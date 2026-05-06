@@ -3956,7 +3956,7 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // claude server
-  program.command('server').description('Start a Claude Code session server').option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--no-auth', 'Disable bearer auth for local trusted environments').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
+  const serverCmd = program.command('server').description('Start a Claude Code session server').enablePositionalOptions().option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--no-auth', 'Disable bearer auth for local trusted environments').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
     port?: string;
     host?: string;
     authToken?: string;
@@ -3986,14 +3986,8 @@ async function run(): Promise<CommanderCommand> {
     } = await import('./server/serverLog.js');
     const {
       writeServerLock,
-      removeServerLock,
-      probeRunningServer
+      removeServerLock
     } = await import('./server/lockfile.js');
-    const existing = await probeRunningServer();
-    if (existing) {
-      process.stderr.write(`A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`);
-      process.exit(1);
-    }
     const authToken = opts.auth === false ? undefined : opts.authToken ?? `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
     const config = {
       port: parseInt(opts.port ?? '0', 10),
@@ -4084,6 +4078,25 @@ async function run(): Promise<CommanderCommand> {
     };
     process.once('SIGINT', () => void shutdown());
     process.once('SIGTERM', () => void shutdown());
+  });
+
+  serverCmd.command('list').description('List all running Claude Code session servers').action(async () => {
+    const {
+      listRunningServers
+    } = await import('./server/lockfile.js');
+    const servers = await listRunningServers();
+    if (servers.length === 0) {
+      process.stdout.write('No running servers found.\n');
+      return;
+    }
+    process.stdout.write(`${servers.length} running server${servers.length === 1 ? '' : 's'}:\n\n`);
+    for (const s of servers) {
+      const age = Math.round((Date.now() - s.startedAt) / 1000);
+      process.stdout.write(`  PID:     ${s.pid}\n`);
+      process.stdout.write(`  URL:     ${s.httpUrl}\n`);
+      process.stdout.write(`  Started: ${new Date(s.startedAt).toISOString()} (${age}s ago)\n`);
+      process.stdout.write('\n');
+    }
   });
 
   // `claude ssh <host> [dir]` — registered here only so --help shows it.

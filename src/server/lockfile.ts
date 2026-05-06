@@ -1,8 +1,8 @@
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 
-type ServerLock = {
+export type ServerLock = {
   pid: number
   port: number
   host: string
@@ -10,19 +10,22 @@ type ServerLock = {
   startedAt: number
 }
 
-function getLockPath(): string {
-  return join(getClaudeConfigHomeDir(), 'server.lock.json')
+function getLocksDir(): string {
+  return join(getClaudeConfigHomeDir(), 'server-locks')
+}
+
+function getLockFilePath(pid: number): string {
+  return join(getLocksDir(), `${pid}.lock.json`)
 }
 
 export async function writeServerLock(lock: ServerLock): Promise<void> {
-  const lockPath = getLockPath()
-  await mkdir(getClaudeConfigHomeDir(), { recursive: true })
-  await writeFile(lockPath, JSON.stringify(lock), 'utf8')
+  const locksDir = getLocksDir()
+  await mkdir(locksDir, { recursive: true })
+  await writeFile(getLockFilePath(lock.pid), JSON.stringify(lock), 'utf8')
 }
 
 export async function removeServerLock(): Promise<void> {
-  const lockPath = getLockPath()
-  await rm(lockPath, { force: true })
+  await rm(getLockFilePath(process.pid), { force: true })
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -34,25 +37,38 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-export async function probeRunningServer(): Promise<ServerLock | null> {
-  const lockPath = getLockPath()
-  let parsed: ServerLock
+export async function listRunningServers(): Promise<ServerLock[]> {
+  const locksDir = getLocksDir()
+  let files: string[]
   try {
-    const raw = await readFile(lockPath, 'utf8')
-    parsed = JSON.parse(raw) as ServerLock
+    files = await readdir(locksDir)
   } catch {
-    return null
+    return []
   }
 
-  if (!parsed || typeof parsed.pid !== 'number') {
-    await removeServerLock()
-    return null
-  }
+  const result: ServerLock[] = []
+  for (const file of files) {
+    if (!file.endsWith('.lock.json')) continue
+    const filePath = join(locksDir, file)
+    let parsed: ServerLock
+    try {
+      const raw = await readFile(filePath, 'utf8')
+      parsed = JSON.parse(raw) as ServerLock
+    } catch {
+      continue
+    }
 
-  if (!isProcessAlive(parsed.pid)) {
-    await removeServerLock()
-    return null
-  }
+    if (!parsed || typeof parsed.pid !== 'number') {
+      await rm(filePath, { force: true })
+      continue
+    }
 
-  return parsed
+    if (!isProcessAlive(parsed.pid)) {
+      await rm(filePath, { force: true })
+      continue
+    }
+
+    result.push(parsed)
+  }
+  return result
 }
