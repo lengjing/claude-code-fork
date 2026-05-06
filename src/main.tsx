@@ -4087,16 +4087,20 @@ async function run(): Promise<CommanderCommand> {
     const servers = await listRunningServers();
     if (servers.length === 0) {
       process.stdout.write('No running servers found.\n');
-      return;
+    } else {
+      process.stdout.write(`${servers.length} running server${servers.length === 1 ? '' : 's'}:\n\n`);
+      for (const s of servers) {
+        const age = Math.round((Date.now() - s.startedAt) / 1000);
+        process.stdout.write(`  PID:     ${s.pid}\n`);
+        process.stdout.write(`  URL:     ${s.httpUrl}\n`);
+        process.stdout.write(`  Started: ${new Date(s.startedAt).toISOString()} (${age}s ago)\n`);
+        process.stdout.write('\n');
+      }
     }
-    process.stdout.write(`${servers.length} running server${servers.length === 1 ? '' : 's'}:\n\n`);
-    for (const s of servers) {
-      const age = Math.round((Date.now() - s.startedAt) / 1000);
-      process.stdout.write(`  PID:     ${s.pid}\n`);
-      process.stdout.write(`  URL:     ${s.httpUrl}\n`);
-      process.stdout.write(`  Started: ${new Date(s.startedAt).toISOString()} (${age}s ago)\n`);
-      process.stdout.write('\n');
-    }
+    // Use process.exit instead of return — the full CLI module initialization
+    // can leave event loop handles that prevent natural exit (same pattern as
+    // templates and other non-interactive commands in this file).
+    process.exit(0);
   });
 
   // `claude ssh <host> [dir]` — registered here only so --help shows it.
