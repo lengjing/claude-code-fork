@@ -13,7 +13,7 @@ export const connectResponseSchema = lazySchema(() =>
 export type ServerConfig = {
   port: number
   host: string
-  authToken: string
+  authToken?: string
   unix?: string
   /** Idle timeout for detached sessions (ms). 0 = never expire. */
   idleTimeoutMs?: number
@@ -39,19 +39,21 @@ export type SessionInfo = {
   sessionKey?: string
 }
 
-/**
- * Stable session key → session metadata. Persisted to ~/.claude/server-sessions.json
- * so sessions can be resumed across server restarts.
- */
-export type SessionIndexEntry = {
-  /** Server-assigned session ID (matches the subprocess's claude session). */
-  sessionId: string
-  /** The claude transcript session ID for --resume. Same as sessionId for direct sessions. */
-  transcriptSessionId: string
-  cwd: string
-  permissionMode?: string
-  createdAt: number
-  lastActiveAt: number
-}
+export type ListedSessionStatus = 'running' | 'detached' | 'persisted'
 
-export type SessionIndex = Record<string, SessionIndexEntry>
+export type ListedSession = {
+  sessionId: string
+  summary?: string
+  lastModified?: number
+  fileSize?: number
+  customTitle?: string
+  firstPrompt?: string
+  gitBranch?: string
+  cwd?: string
+  tag?: string
+  createdAt?: number
+  lastActiveAt?: number
+  active: boolean
+  attachedClients: number
+  status: ListedSessionStatus
+}

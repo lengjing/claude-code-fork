@@ -37,6 +37,13 @@ export async function createDirectConnectSession({
   config: DirectConnectConfig
   workDir?: string
 }> {
+  const unixSocketPath = serverUrl.startsWith('unix:')
+    ? serverUrl.slice('unix:'.length)
+    : undefined
+  const sessionsEndpoint = unixSocketPath
+    ? 'http://localhost/sessions'
+    : `${serverUrl}/sessions`
+
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   }
@@ -46,7 +53,7 @@ export async function createDirectConnectSession({
 
   let resp: Response
   try {
-    resp = await fetch(`${serverUrl}/sessions`, {
+    resp = await fetch(sessionsEndpoint, {
       method: 'POST',
       headers,
       body: jsonStringify({
@@ -55,7 +62,10 @@ export async function createDirectConnectSession({
           dangerously_skip_permissions: true,
         }),
       }),
-    })
+      ...(unixSocketPath && {
+        unix: unixSocketPath,
+      }),
+    } as RequestInit)
   } catch (err) {
     throw new DirectConnectError(
       `Failed to connect to server at ${serverUrl}: ${errorMessage(err)}`,
@@ -82,6 +92,7 @@ export async function createDirectConnectSession({
       sessionId: data.session_id,
       wsUrl: data.ws_url,
       authToken,
+      unixSocketPath,
     },
     workDir: data.work_dir,
   }

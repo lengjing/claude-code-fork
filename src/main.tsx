@@ -49,7 +49,7 @@ import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js';
 import { count, uniq } from './utils/array.js';
 import { installAsciicastRecorder } from './utils/asciicast.js';
 import { getSubscriptionType, isClaudeAISubscriber, prefetchAwsCredentialsAndBedRockInfoIfSafe, prefetchGcpCredentialsIfSafe, validateForceLoginOrg } from './utils/auth.js';
-import { checkHasTrustDialogAccepted, getGlobalConfig, getRemoteControlAtStartup, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js';
+import { checkHasTrustDialogAccepted, enableConfigs, getGlobalConfig, getRemoteControlAtStartup, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js';
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
 import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
 import { getInitialFastModeSetting, isFastModeEnabled, prefetchFastModeStatus, resolveFastModeStatusFromCache } from './utils/fastMode.js';
@@ -609,35 +609,33 @@ export async function main() {
   // Check for cc:// or cc+unix:// URL in argv — rewrite so the main command
   // handles it, giving the full interactive TUI instead of a stripped-down subcommand.
   // For headless (-p), we rewrite to the internal `open` subcommand.
-  if (feature('DIRECT_CONNECT')) {
-    const rawCliArgs = process.argv.slice(2);
-    const ccIdx = rawCliArgs.findIndex(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
-    if (ccIdx !== -1 && _pendingConnect) {
-      const ccUrl = rawCliArgs[ccIdx]!;
-      const {
-        parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
-      const parsed = parseConnectUrl(ccUrl);
-      _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
-      if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
-        // Headless: rewrite to internal `open` subcommand
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, 'open', ccUrl, ...stripped];
-      } else {
-        // Interactive: strip cc:// URL and flags, run main command
-        _pendingConnect.url = parsed.serverUrl;
-        _pendingConnect.authToken = parsed.authToken;
-        const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
-        const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
-        if (dspIdx !== -1) {
-          stripped.splice(dspIdx, 1);
-        }
-        process.argv = [process.argv[0]!, process.argv[1]!, ...stripped];
+  const rawCliArgs = process.argv.slice(2);
+  const ccIdx = rawCliArgs.findIndex(a => a.startsWith('cc://') || a.startsWith('cc+unix://'));
+  if (ccIdx !== -1 && _pendingConnect) {
+    const ccUrl = rawCliArgs[ccIdx]!;
+    const {
+      parseConnectUrl
+    } = await import('./server/parseConnectUrl.js');
+    const parsed = parseConnectUrl(ccUrl);
+    _pendingConnect.dangerouslySkipPermissions = rawCliArgs.includes('--dangerously-skip-permissions');
+    if (rawCliArgs.includes('-p') || rawCliArgs.includes('--print')) {
+      // Headless: rewrite to internal `open` subcommand
+      const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
+      const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
+      if (dspIdx !== -1) {
+        stripped.splice(dspIdx, 1);
       }
+      process.argv = [process.argv[0]!, process.argv[1]!, 'open', ccUrl, ...stripped];
+    } else {
+      // Interactive: strip cc:// URL and flags, run main command
+      _pendingConnect.url = parsed.serverUrl;
+      _pendingConnect.authToken = parsed.authToken;
+      const stripped = rawCliArgs.filter((_, i) => i !== ccIdx);
+      const dspIdx = stripped.indexOf('--dangerously-skip-permissions');
+      if (dspIdx !== -1) {
+        stripped.splice(dspIdx, 1);
+      }
+      process.argv = [process.argv[0]!, process.argv[1]!, ...stripped];
     }
   }
 
@@ -3153,7 +3151,7 @@ async function run(): Promise<CommanderCommand> {
         logError(error);
         process.exit(1);
       }
-    } else if (feature('DIRECT_CONNECT') && _pendingConnect?.url) {
+    } else if (_pendingConnect?.url) {
       // `claude connect <url>` — full interactive TUI connected to a remote server
       let directConnectConfig;
       try {
@@ -3958,84 +3956,135 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // claude server
-  if (feature('DIRECT_CONNECT')) {
-    program.command('server').description('Start a Claude Code session server').option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
-      port: string;
-      host: string;
-      authToken?: string;
-      unix?: string;
-      workspace?: string;
-      idleTimeout: string;
-      maxSessions: string;
-    }) => {
-      const {
-        randomBytes
-      } = await import('crypto');
-      const {
-        startServer
-      } = await import('./server/server.js');
-      const {
-        SessionManager
-      } = await import('./server/sessionManager.js');
-      const {
-        DangerousBackend
-      } = await import('./server/backends/dangerousBackend.js');
-      const {
-        printBanner
-      } = await import('./server/serverBanner.js');
-      const {
-        createServerLogger
-      } = await import('./server/serverLog.js');
-      const {
-        writeServerLock,
-        removeServerLock,
-        probeRunningServer
-      } = await import('./server/lockfile.js');
-      const existing = await probeRunningServer();
-      if (existing) {
-        process.stderr.write(`A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`);
-        process.exit(1);
+  program.command('server').description('Start a Claude Code session server').option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--no-auth', 'Disable bearer auth for local trusted environments').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
+    port?: string;
+    host?: string;
+    authToken?: string;
+    auth: boolean;
+    unix?: string;
+    workspace?: string;
+    idleTimeout?: string;
+    maxSessions?: string;
+  }) => {
+    const {
+      randomBytes
+    } = await import('crypto');
+    const {
+      startServer
+    } = await import('./server/server.js');
+    const {
+      SessionManager
+    } = await import('./server/sessionManager.js');
+    const {
+      DangerousBackend
+    } = await import('./server/backends/dangerousBackend.js');
+    const {
+      printBanner
+    } = await import('./server/serverBanner.js');
+    const {
+      createServerLogger
+    } = await import('./server/serverLog.js');
+    const {
+      writeServerLock,
+      removeServerLock,
+      probeRunningServer
+    } = await import('./server/lockfile.js');
+    const existing = await probeRunningServer();
+    if (existing) {
+      process.stderr.write(`A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`);
+      process.exit(1);
+    }
+    const authToken = opts.auth === false ? undefined : opts.authToken ?? `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
+    const config = {
+      port: parseInt(opts.port ?? '0', 10),
+      host: opts.host ?? '0.0.0.0',
+      authToken,
+      unix: opts.unix,
+      workspace: opts.workspace,
+      idleTimeoutMs: parseInt(opts.idleTimeout ?? '600000', 10),
+      maxSessions: parseInt(opts.maxSessions ?? '32', 10)
+    };
+    const sessionCwd = opts.workspace || getCwd();
+    let sharedServerRuntimePromise: Promise<{
+      commands: Awaited<ReturnType<typeof getCommands>>;
+      agentDefinitions: Awaited<ReturnType<typeof getAgentDefinitionsWithOverrides>>;
+      toolPermissionContext: Awaited<ReturnType<typeof initializeToolPermissionContext>>['toolPermissionContext'];
+      tools: ReturnType<typeof getTools>;
+    }> | null = null;
+    const backend = new DangerousBackend({
+      createRuntime: async sessionOpts => {
+        if (!sharedServerRuntimePromise) {
+          sharedServerRuntimePromise = (async () => {
+            enableConfigs();
+            const commands = (await getCommands(sessionCwd)).filter(command => command.type === 'prompt' && !command.disableNonInteractive || command.type === 'local' && command.supportsNonInteractive);
+            const agentDefinitions = await getAgentDefinitionsWithOverrides(sessionCwd);
+            const permissionInit = await initializeToolPermissionContext({
+              allowedToolsCli: undefined,
+              disallowedToolsCli: undefined,
+              baseToolsCli: undefined,
+              permissionMode: 'default',
+              allowDangerouslySkipPermissions: false,
+              addDirs: undefined
+            });
+            return {
+              commands,
+              agentDefinitions,
+              toolPermissionContext: permissionInit.toolPermissionContext,
+              tools: getTools(permissionInit.toolPermissionContext)
+            };
+          })();
+        }
+        const shared = await sharedServerRuntimePromise;
+        const defaultState = getDefaultAppState();
+        const sessionPermissionContext = sessionOpts.dangerouslySkipPermissions ? {
+          ...shared.toolPermissionContext,
+          mode: 'bypassPermissions'
+        } : shared.toolPermissionContext;
+        const initialState = {
+          ...defaultState,
+          toolPermissionContext: sessionPermissionContext,
+          agentDefinitions: shared.agentDefinitions
+        };
+        const store = createStore(initialState, onChangeAppState);
+        return {
+          commands: shared.commands,
+          tools: shared.tools,
+          sdkMcpConfigs: {},
+          agents: shared.agentDefinitions.activeAgents,
+          getAppState: () => store.getState(),
+          setAppState: store.setState,
+          baseOptions: {}
+        };
       }
-      const authToken = opts.authToken ?? `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
-      const config = {
-        port: parseInt(opts.port, 10),
-        host: opts.host,
-        authToken,
-        unix: opts.unix,
-        workspace: opts.workspace,
-        idleTimeoutMs: parseInt(opts.idleTimeout, 10),
-        maxSessions: parseInt(opts.maxSessions, 10)
-      };
-      const backend = new DangerousBackend();
-      const sessionManager = new SessionManager(backend, {
-        idleTimeoutMs: config.idleTimeoutMs,
-        maxSessions: config.maxSessions
-      });
-      const logger = createServerLogger();
-      const server = startServer(config, sessionManager, logger);
-      const actualPort = server.port ?? config.port;
-      printBanner(config, authToken, actualPort);
-      await writeServerLock({
-        pid: process.pid,
-        port: actualPort,
-        host: config.host,
-        httpUrl: config.unix ? `unix:${config.unix}` : `http://${config.host}:${actualPort}`,
-        startedAt: Date.now()
-      });
-      let shuttingDown = false;
-      const shutdown = async () => {
-        if (shuttingDown) return;
-        shuttingDown = true;
-        // Stop accepting new connections before tearing down sessions.
-        server.stop(true);
-        await sessionManager.destroyAll();
-        await removeServerLock();
-        process.exit(0);
-      };
-      process.once('SIGINT', () => void shutdown());
-      process.once('SIGTERM', () => void shutdown());
     });
-  }
+    const sessionManager = new SessionManager(backend, {
+      idleTimeoutMs: config.idleTimeoutMs,
+      maxSessions: config.maxSessions
+    });
+    const logger = createServerLogger();
+    const server = startServer(config, sessionManager, logger);
+    const actualPort = server.port ?? config.port;
+    printBanner(config, authToken, actualPort);
+    await writeServerLock({
+      pid: process.pid,
+      port: actualPort,
+      host: config.host,
+      httpUrl: config.unix ? `unix:${config.unix}` : `http://${config.host}:${actualPort}`,
+      startedAt: Date.now()
+    });
+    let shuttingDown = false;
+    const shutdown = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      // Stop accepting new connections before tearing down sessions.
+      server.stop(true);
+      await sessionManager.destroyAll();
+      await removeServerLock();
+      process.exit(0);
+    };
+    process.once('SIGINT', () => void shutdown());
+    process.once('SIGTERM', () => void shutdown());
+  });
 
   // `claude ssh <host> [dir]` — registered here only so --help shows it.
   // The actual interactive flow is handled by early argv rewriting in main()
@@ -4055,45 +4104,43 @@ async function run(): Promise<CommanderCommand> {
   // claude connect — subcommand only handles -p (headless) mode.
   // Interactive mode (without -p) is handled by early argv rewriting in main()
   // which redirects to the main command with full TUI support.
-  if (feature('DIRECT_CONNECT')) {
-    program.command('open <cc-url>').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print [prompt]', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, opts: {
-      print?: string | boolean;
-      outputFormat: string;
-    }) => {
-      const {
-        parseConnectUrl
-      } = await import('./server/parseConnectUrl.js');
-      const {
+  program.command('open <cc-url>').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print [prompt]', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, opts: {
+    print?: string | boolean;
+    outputFormat?: string;
+  }) => {
+    const {
+      parseConnectUrl
+    } = await import('./server/parseConnectUrl.js');
+    const {
+      serverUrl,
+      authToken
+    } = parseConnectUrl(ccUrl);
+    let connectConfig;
+    try {
+      const session = await createDirectConnectSession({
         serverUrl,
-        authToken
-      } = parseConnectUrl(ccUrl);
-      let connectConfig;
-      try {
-        const session = await createDirectConnectSession({
-          serverUrl,
-          authToken,
-          cwd: getOriginalCwd(),
-          dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions
-        });
-        if (session.workDir) {
-          setOriginalCwd(session.workDir);
-          setCwdState(session.workDir);
-        }
-        setDirectConnectServerUrl(serverUrl);
-        connectConfig = session.config;
-      } catch (err) {
-        // biome-ignore lint/suspicious/noConsole: intentional error output
-        console.error(err instanceof DirectConnectError ? err.message : String(err));
-        process.exit(1);
+        authToken,
+        cwd: getOriginalCwd(),
+        dangerouslySkipPermissions: _pendingConnect?.dangerouslySkipPermissions
+      });
+      if (session.workDir) {
+        setOriginalCwd(session.workDir);
+        setCwdState(session.workDir);
       }
-      const {
-        runConnectHeadless
-      } = await import('./server/connectHeadless.js');
-      const prompt = typeof opts.print === 'string' ? opts.print : '';
-      const interactive = opts.print === true;
-      await runConnectHeadless(connectConfig, prompt, opts.outputFormat, interactive);
-    });
-  }
+      setDirectConnectServerUrl(serverUrl);
+      connectConfig = session.config;
+    } catch (err) {
+      // biome-ignore lint/suspicious/noConsole: intentional error output
+      console.error(err instanceof DirectConnectError ? err.message : String(err));
+      process.exit(1);
+    }
+    const {
+      runConnectHeadless
+    } = await import('./server/connectHeadless.js');
+    const prompt = typeof opts.print === 'string' ? opts.print : '';
+    const interactive = opts.print === true;
+    await runConnectHeadless(connectConfig, prompt, opts.outputFormat ?? 'text', interactive);
+  });
 
   // claude auth
 
