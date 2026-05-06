@@ -4013,12 +4013,12 @@ async function run(): Promise<CommanderCommand> {
             const commands = (await getCommands(sessionCwd)).filter(command => command.type === 'prompt' && !command.disableNonInteractive || command.type === 'local' && command.supportsNonInteractive);
             const agentDefinitions = await getAgentDefinitionsWithOverrides(sessionCwd);
             const permissionInit = await initializeToolPermissionContext({
-              allowedToolsCli: undefined,
-              disallowedToolsCli: undefined,
-              baseToolsCli: undefined,
+              allowedToolsCli: [],
+              disallowedToolsCli: [],
+              baseToolsCli: [],
               permissionMode: 'default',
               allowDangerouslySkipPermissions: false,
-              addDirs: undefined
+              addDirs: []
             });
             return {
               commands,

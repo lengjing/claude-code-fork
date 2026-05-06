@@ -6,7 +6,7 @@ import { getGroveNoticeConfig, getGroveSettings } from '../../services/api/grove
 import { clearPolicyLimitsCache } from '../../services/policyLimits/index.js';
 // flushTelemetry is loaded lazily to avoid pulling in ~1.1MB of OpenTelemetry at startup
 import { clearRemoteManagedSettingsCache } from '../../services/remoteManagedSettings/index.js';
-import { getClaudeAIOAuthTokens, removeApiKey } from '../../utils/auth.js';
+import { clearCodexOAuthTokens, clearOpenAICompatibleProviderConfig, getClaudeAIOAuthTokens, removeApiKey } from '../../utils/auth.js';
 import { clearBetasCaches } from '../../utils/betas.js';
 import { saveGlobalConfig } from '../../utils/config.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
@@ -22,6 +22,8 @@ export async function performLogout({
   } = await import('../../utils/telemetry/instrumentation.js');
   await flushTelemetry();
   await removeApiKey();
+  clearOpenAICompatibleProviderConfig();
+  clearCodexOAuthTokens();
 
   // Wipe all secure storage data on logout
   const secureStorage = getSecureStorage();
