@@ -73,6 +73,7 @@ import {
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
+  updateSettingsForSource,
 } from './settings/settings.js'
 import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
@@ -113,10 +114,7 @@ export function isAnthropicAuthEnabled(): boolean {
     return !!process.env.CLAUDE_CODE_OAUTH_TOKEN
   }
 
-  const is3P =
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+  const is3P = getAPIProvider() !== 'firstParty'
 
   // Check if user has configured an external API key source
   // This allows externally-provided API keys to work (without requiring proxy configuration)
@@ -211,6 +209,114 @@ export type ApiKeySource =
   | 'apiKeyHelper'
   | '/login managed key'
   | 'none'
+
+const OPENAI_COMPATIBLE_ENV_KEYS = [
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  // Legacy key kept here so we can clean up older persisted configs.
+  'OPENAI_MODEL',
+] as const
+
+const THIRD_PARTY_PROVIDER_ENV_KEYS = [
+  'CLAUDE_CODE_USE_OPENAI',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+] as const
+
+export type OpenAICompatibleProviderConfig = {
+  apiKey: string
+  baseUrl: string
+  model: string
+}
+
+function mutateGlobalConfigEnv(
+  updater: (env: Record<string, string>) => Record<string, string>,
+): void {
+  saveGlobalConfig(current => ({
+    ...current,
+    env: updater({ ...current.env }),
+  }))
+}
+
+function clearEnvKeys(
+  env: Record<string, string>,
+  keys: readonly string[],
+): Record<string, string> {
+  for (const key of keys) {
+    delete env[key]
+  }
+  return env
+}
+
+function normalizeOpenAICompatibleBaseUrl(baseUrl: string): string {
+  return baseUrl
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(chat\/completions|responses)$/i, '')
+}
+
+export function getOpenAICompatibleApiKey(): string | null {
+  const apiKey = process.env.OPENAI_API_KEY?.trim()
+  return apiKey ? apiKey : null
+}
+
+export function getOpenAICompatibleBaseUrl(): string {
+  const configuredBaseUrl = process.env.OPENAI_BASE_URL?.trim()
+  return normalizeOpenAICompatibleBaseUrl(
+    configuredBaseUrl || 'https://api.openai.com/v1',
+  )
+}
+
+export function getOpenAICompatibleModel(): string | null {
+  const model = getSettings_DEPRECATED()?.model?.trim()
+  return model ? model : null
+}
+
+export function isOpenAICompatibleProvider(): boolean {
+  return (
+    getAPIProvider() === 'openai' && getOpenAICompatibleApiKey() !== null
+  )
+}
+
+export function saveOpenAICompatibleProviderConfig(
+  config: OpenAICompatibleProviderConfig,
+): void {
+  mutateGlobalConfigEnv(env => {
+    clearEnvKeys(env, THIRD_PARTY_PROVIDER_ENV_KEYS)
+    clearEnvKeys(env, OPENAI_COMPATIBLE_ENV_KEYS)
+    env.CLAUDE_CODE_USE_OPENAI = '1'
+    env.OPENAI_API_KEY = config.apiKey.trim()
+    env.OPENAI_BASE_URL = normalizeOpenAICompatibleBaseUrl(config.baseUrl)
+    return env
+  })
+  updateSettingsForSource('userSettings', { model: config.model.trim() })
+}
+
+export function clearOpenAICompatibleProviderConfig(): void {
+  mutateGlobalConfigEnv(env => {
+    clearEnvKeys(env, OPENAI_COMPATIBLE_ENV_KEYS)
+    delete env.CLAUDE_CODE_USE_OPENAI
+    return env
+  })
+}
+
+export function activateCodexProvider(): void {
+  mutateGlobalConfigEnv(env => {
+    clearEnvKeys(env, THIRD_PARTY_PROVIDER_ENV_KEYS)
+    clearEnvKeys(env, OPENAI_COMPATIBLE_ENV_KEYS)
+    env.CLAUDE_CODE_USE_OPENAI = '1'
+    return env
+  })
+}
+
+export function activateAnthropicProvider(): void {
+  mutateGlobalConfigEnv(env => {
+    clearEnvKeys(env, THIRD_PARTY_PROVIDER_ENV_KEYS)
+    clearEnvKeys(env, OPENAI_COMPATIBLE_ENV_KEYS)
+    return env
+  })
+}
 
 export function getAnthropicApiKey(): null | string {
   const { key } = getAnthropicApiKeyWithSource()
@@ -1628,7 +1734,7 @@ export function isClaudeAISubscriber(): boolean {
 
 export function isCodexSubscriber(): boolean {
   // Only treat as Codex subscriber when explicitly using OpenAI provider
-  if (getAPIProvider() !== 'openai') {
+  if (getAPIProvider() !== 'openai' || isOpenAICompatibleProvider()) {
     return false
   }
 

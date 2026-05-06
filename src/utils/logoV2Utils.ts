@@ -1,7 +1,12 @@
 import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.js'
 import { stringWidth } from '../ink/stringWidth.js'
 import type { LogOption } from '../types/logs.js'
-import { getSubscriptionName, isClaudeAISubscriber, isCodexSubscriber } from './auth.js'
+import {
+  getSubscriptionName,
+  isClaudeAISubscriber,
+  isCodexSubscriber,
+  isOpenAICompatibleProvider,
+} from './auth.js'
 import { getCwd } from './cwd.js'
 import { getDisplayPath } from './file.js'
 import {
@@ -260,6 +265,8 @@ export function getLogoDisplayData(): {
     ? getSubscriptionName()
     : isCodexSubscriber()
       ? 'Codex API Billing'
+      : isOpenAICompatibleProvider()
+        ? 'OpenAI-compatible API Billing'
       : 'API Usage Billing'
   const agentName = getInitialSettings().agent
 

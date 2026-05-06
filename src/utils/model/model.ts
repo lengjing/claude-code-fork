@@ -7,13 +7,14 @@
  */
 import { getMainLoopModelOverride } from '../../bootstrap/state.js'
 import {
+  getOpenAICompatibleModel,
   getSubscriptionType,
   isClaudeAISubscriber,
   isCodexSubscriber,
   isMaxSubscriber,
   isProSubscriber,
   isTeamPremiumSubscriber,
-  isCodexSubscriber,
+  isOpenAICompatibleProvider,
 } from '../auth.js'
 import { getAntModelOverrideConfig, resolveAntModel } from './antModels.js'
 import {
@@ -183,6 +184,10 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     return getModelStrings().gpt53codex
   }
 
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleModel() ?? getModelStrings().gpt54
+  }
+
   // Ants default to defaultModel from flag config, or Opus 1M if not configured
   if (process.env.USER_TYPE === 'ant') {
     return (
@@ -305,6 +310,12 @@ export function getClaudeAiUserDefaultModelDescription(
 ): string {
   if (isCodexSubscriber()) {
     return 'GPT-5.3 Codex · Optimized for code generation and understanding'
+  }
+  if (isOpenAICompatibleProvider()) {
+    const model = getOpenAICompatibleModel()
+    return model
+      ? `OpenAI-compatible model · ${model}`
+      : 'OpenAI-compatible API model'
   }
   if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
     if (isOpus1mMergeEnabled()) {

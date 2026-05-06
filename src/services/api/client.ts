@@ -8,12 +8,14 @@ import {
 import type { GoogleAuth } from 'google-auth-library'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
+  getOpenAICompatibleApiKey,
   getAnthropicApiKey,
   getApiKeyFromApiKeyHelper,
   getClaudeAIOAuthTokens,
   getCodexOAuthTokens,
   isClaudeAISubscriber,
   isCodexSubscriber,
+  isOpenAICompatibleProvider,
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
@@ -36,6 +38,7 @@ import {
   isEnvTruthy,
 } from '../../utils/envUtils.js'
 import { createCodexFetch } from './codex-fetch-adapter.js'
+import { createOpenAICompatibleFetch } from './openai-compatible-fetch-adapter.js'
 
 /**
  * Environment variables for different client types:
@@ -318,6 +321,17 @@ export async function getAnthropicClient({
       }
       return new Anthropic(clientConfig)
     }
+  }
+
+  if (isOpenAICompatibleProvider() && getOpenAICompatibleApiKey()) {
+    const openAIFetch = createOpenAICompatibleFetch()
+    const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
+      apiKey: 'openai-compatible-placeholder',
+      ...ARGS,
+      fetch: openAIFetch as unknown as typeof globalThis.fetch,
+      ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+    }
+    return new Anthropic(clientConfig)
   }
 
   // Determine authentication method based on available tokens

@@ -1,10 +1,12 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { getInitialMainLoopModel } from '../../bootstrap/state.js'
 import {
+  getOpenAICompatibleModel,
   isClaudeAISubscriber,
   isCodexSubscriber,
   isMaxSubscriber,
   isTeamPremiumSubscriber,
+  isOpenAICompatibleProvider,
 } from '../auth.js'
 import { getModelStrings } from './modelStrings.js'
 import {
@@ -326,6 +328,10 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     ]
   }
 
+  if (isOpenAICompatibleProvider()) {
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   if (isClaudeAISubscriber()) {
     if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
       // Max and Team Premium users: Opus is default, show Sonnet as alternative
@@ -499,6 +505,18 @@ function getKnownModelOption(model: string): ModelOption | null {
 
 export function getModelOptions(fastMode = false): ModelOption[] {
   const options = getModelOptionsBase(fastMode)
+
+  const openAICompatibleModel = getOpenAICompatibleModel()
+  if (
+    openAICompatibleModel &&
+    !options.some(existing => existing.value === openAICompatibleModel)
+  ) {
+    options.push({
+      value: openAICompatibleModel,
+      label: openAICompatibleModel,
+      description: `OpenAI-compatible model (${openAICompatibleModel})`,
+    })
+  }
 
   // Add the custom model from the ANTHROPIC_CUSTOM_MODEL_OPTION env var
   const envCustomModel = process.env.ANTHROPIC_CUSTOM_MODEL_OPTION
