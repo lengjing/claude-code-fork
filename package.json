@@ -1,6 +1,6 @@
 {
   "name": "@claude-code-fork/claude-code",
-  "version": "2.1.87",
+  "version": "2.1.88",
   "description": "Claude Code Fork - A fork of Claude Code by Anthropic.",
   "type": "module",
   "packageManager": "bun@1.3.11",
@@ -116,6 +116,11 @@
     "xxhash-wasm": "^1.1.0",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "@claude-code-fork/cli-darwin-arm64": "2.1.87",
+    "@claude-code-fork/cli-linux-x64": "2.1.87",
+    "@claude-code-fork/cli-win32-x64": "2.1.87"
   },
   "devDependencies": {
     "@types/bun": "^1.3.11",
