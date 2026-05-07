@@ -1,0 +1,13 @@
+{
+  "name": "@claude-code-fork/cli-linux-x64",
+  "version": "2.1.87",
+  "description": "Linux x64 binary for @claude-code-fork/claude-code",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "files": [
+    "claude-code-fork"
+  ],
+  "preferUnplugged": true
+}

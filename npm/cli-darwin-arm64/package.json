@@ -1,0 +1,12 @@
+{
+  "name": "@claude-code-fork/cli-darwin-arm64",
+  "version": "2.1.87",
+  "description": "macOS ARM64 binary for @claude-code-fork/claude-code",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": [
+    "claude-code-fork"
+  ],
+  "preferUnplugged": true
+}
