@@ -37,7 +37,15 @@ type Props = {
   forceLoginMethod?: 'claudeai' | 'console'
 }
 
-type OpenAICompatiblePreset = 'openai' | 'deepseek' | 'qwen' | 'custom'
+type OpenAICompatiblePreset =
+  | 'openai'
+  | 'deepseek'
+  | 'qwen'
+  | 'minimax'
+  | 'zhipu'
+  | 'moonshot'
+  | 'siliconflow'
+  | 'custom'
 
 type OpenAICompatibleSetupState = {
   state: 'openai_setup'
@@ -45,7 +53,7 @@ type OpenAICompatibleSetupState = {
   baseUrl: string
   apiKey: string
   model: string
-  step: 'base_url' | 'api_key' | 'model'
+  step: 'base_url' | 'api_key' | 'model_select' | 'model'
 }
 
 type OAuthStatus =
@@ -67,37 +75,268 @@ const OPENAI_COMPATIBLE_PRESETS: Array<{
   value: OpenAICompatiblePreset
   label: React.ReactNode
   baseUrl: string
-  model: string
+  defaultModel: string
+  models: Array<{ value: string; label: React.ReactNode }>
 }> = [
   {
     value: 'deepseek',
     label: (
       <Text>
-        DeepSeek API · <Text dimColor={true}>OpenAI-compatible</Text>
+        DeepSeek · <Text dimColor={true}>api.deepseek.com</Text>
       </Text>
     ),
     baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-chat',
+    models: [
+      {
+        value: 'deepseek-chat',
+        label: (
+          <Text>
+            deepseek-chat · <Text dimColor={true}>DeepSeek V3 (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'deepseek-reasoner',
+        label: (
+          <Text>
+            deepseek-reasoner · <Text dimColor={true}>DeepSeek R1 (reasoning)</Text>
+          </Text>
+        ),
+      },
+    ],
   },
   {
     value: 'qwen',
     label: (
       <Text>
-        Qwen / DashScope · <Text dimColor={true}>Aliyun compatible-mode</Text>
+        通义千问 (Qwen) · <Text dimColor={true}>Alibaba DashScope</Text>
       </Text>
     ),
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
+    defaultModel: 'qwen-plus',
+    models: [
+      {
+        value: 'qwen-plus',
+        label: (
+          <Text>
+            qwen-plus · <Text dimColor={true}>balanced speed & quality (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'qwen-max',
+        label: (
+          <Text>
+            qwen-max · <Text dimColor={true}>most capable</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'qwen-turbo',
+        label: (
+          <Text>
+            qwen-turbo · <Text dimColor={true}>fast & cost-effective</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'qwen-long',
+        label: (
+          <Text>
+            qwen-long · <Text dimColor={true}>long context (1M tokens)</Text>
+          </Text>
+        ),
+      },
+    ],
+  },
+  {
+    value: 'zhipu',
+    label: (
+      <Text>
+        智谱 (Zhipu AI) · <Text dimColor={true}>open.bigmodel.cn</Text>
+      </Text>
+    ),
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-4-plus',
+    models: [
+      {
+        value: 'glm-4-plus',
+        label: (
+          <Text>
+            glm-4-plus · <Text dimColor={true}>most capable (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'glm-4-air',
+        label: (
+          <Text>
+            glm-4-air · <Text dimColor={true}>efficient & cost-effective</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'glm-4-flash',
+        label: (
+          <Text>
+            glm-4-flash · <Text dimColor={true}>fast & free tier available</Text>
+          </Text>
+        ),
+      },
+    ],
+  },
+  {
+    value: 'moonshot',
+    label: (
+      <Text>
+        月之暗面 (Moonshot / Kimi) · <Text dimColor={true}>api.moonshot.cn</Text>
+      </Text>
+    ),
+    baseUrl: 'https://api.moonshot.cn/v1',
+    defaultModel: 'moonshot-v1-8k',
+    models: [
+      {
+        value: 'moonshot-v1-8k',
+        label: (
+          <Text>
+            moonshot-v1-8k · <Text dimColor={true}>8k context (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'moonshot-v1-32k',
+        label: (
+          <Text>
+            moonshot-v1-32k · <Text dimColor={true}>32k context</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'moonshot-v1-128k',
+        label: (
+          <Text>
+            moonshot-v1-128k · <Text dimColor={true}>128k context</Text>
+          </Text>
+        ),
+      },
+    ],
+  },
+  {
+    value: 'minimax',
+    label: (
+      <Text>
+        MiniMax · <Text dimColor={true}>api.minimaxi.chat</Text>
+      </Text>
+    ),
+    baseUrl: 'https://api.minimaxi.chat/v1',
+    defaultModel: 'MiniMax-Text-01',
+    models: [
+      {
+        value: 'MiniMax-Text-01',
+        label: (
+          <Text>
+            MiniMax-Text-01 · <Text dimColor={true}>most capable (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'abab6.5s-chat',
+        label: (
+          <Text>
+            abab6.5s-chat · <Text dimColor={true}>fast & cost-effective</Text>
+          </Text>
+        ),
+      },
+    ],
+  },
+  {
+    value: 'siliconflow',
+    label: (
+      <Text>
+        SiliconFlow · <Text dimColor={true}>api.siliconflow.cn</Text>
+      </Text>
+    ),
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    defaultModel: 'Qwen/Qwen2.5-72B-Instruct',
+    models: [
+      {
+        value: 'Qwen/Qwen2.5-72B-Instruct',
+        label: (
+          <Text>
+            Qwen2.5-72B-Instruct · <Text dimColor={true}>Qwen flagship (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'deepseek-ai/DeepSeek-V3',
+        label: (
+          <Text>
+            DeepSeek-V3 · <Text dimColor={true}>DeepSeek via SiliconFlow</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'deepseek-ai/DeepSeek-R1',
+        label: (
+          <Text>
+            DeepSeek-R1 · <Text dimColor={true}>reasoning model via SiliconFlow</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'Pro/Qwen/Qwen2.5-7B-Instruct',
+        label: (
+          <Text>
+            Qwen2.5-7B-Instruct · <Text dimColor={true}>lightweight, free tier</Text>
+          </Text>
+        ),
+      },
+    ],
   },
   {
     value: 'openai',
     label: (
       <Text>
-        OpenAI API · <Text dimColor={true}>Official OpenAI-compatible API</Text>
+        OpenAI · <Text dimColor={true}>Official OpenAI API</Text>
       </Text>
     ),
     baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4.1',
+    defaultModel: 'gpt-4.1',
+    models: [
+      {
+        value: 'gpt-4.1',
+        label: (
+          <Text>
+            gpt-4.1 · <Text dimColor={true}>latest GPT-4.1 (recommended)</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'gpt-4.1-mini',
+        label: (
+          <Text>
+            gpt-4.1-mini · <Text dimColor={true}>fast & cost-effective</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'gpt-4o',
+        label: (
+          <Text>
+            gpt-4o · <Text dimColor={true}>multimodal</Text>
+          </Text>
+        ),
+      },
+      {
+        value: 'o3-mini',
+        label: (
+          <Text>
+            o3-mini · <Text dimColor={true}>reasoning model</Text>
+          </Text>
+        ),
+      },
+    ],
   },
   {
     value: 'custom',
@@ -107,9 +346,18 @@ const OPENAI_COMPATIBLE_PRESETS: Array<{
       </Text>
     ),
     baseUrl: '',
-    model: '',
+    defaultModel: '',
+    models: [],
   },
 ]
+
+function getPresetModels(
+  preset: OpenAICompatiblePreset,
+): Array<{ value: string; label: React.ReactNode }> {
+  return (
+    OPENAI_COMPATIBLE_PRESETS.find(p => p.value === preset)?.models ?? []
+  )
+}
 
 function createOpenAISetupState(
   preset: OpenAICompatiblePreset,
@@ -123,7 +371,7 @@ function createOpenAISetupState(
     preset,
     baseUrl: selectedPreset?.baseUrl ?? '',
     apiKey: '',
-    model: selectedPreset?.model ?? '',
+    model: selectedPreset?.defaultModel ?? '',
     step: preset === 'custom' ? 'base_url' : 'api_key',
   }
 }
@@ -481,7 +729,7 @@ export function ConsoleOAuthFlow({
         setOAuthStatus({
           ...oauthStatus,
           apiKey: trimmed,
-          step: 'model',
+          step: getPresetModels(oauthStatus.preset).length > 0 ? 'model_select' : 'model',
         })
         return
       }
@@ -503,12 +751,40 @@ export function ConsoleOAuthFlow({
     [oauthStatus, saveOpenAICompatibleConfig],
   )
 
+  const handleModelSelect = useCallback(
+    async (modelValue: string) => {
+      if (oauthStatus.state !== 'openai_setup') {
+        return
+      }
+      if (modelValue === '__custom__') {
+        setOAuthStatus({
+          ...oauthStatus,
+          step: 'model',
+        })
+        return
+      }
+      await saveOpenAICompatibleConfig({
+        ...oauthStatus,
+        model: modelValue,
+      })
+    },
+    [oauthStatus, saveOpenAICompatibleConfig],
+  )
+
   const handleOpenAISetupCancel = useCallback(() => {
     if (oauthStatus.state !== 'openai_setup') {
       return
     }
 
     if (oauthStatus.step === 'model') {
+      setOAuthStatus({
+        ...oauthStatus,
+        step: getPresetModels(oauthStatus.preset).length > 0 ? 'model_select' : 'api_key',
+      })
+      return
+    }
+
+    if (oauthStatus.step === 'model_select') {
       setOAuthStatus({
         ...oauthStatus,
         step: 'api_key',
@@ -638,6 +914,7 @@ export function ConsoleOAuthFlow({
           openAIInputCursorOffset={openAIInputCursorOffset}
           setOpenAIInputCursorOffset={setOpenAIInputCursorOffset}
           handleOpenAISetupSubmit={handleOpenAISetupSubmit}
+          handleModelSelect={handleModelSelect}
         />
       </Box>
     </Box>
@@ -664,6 +941,7 @@ type OAuthStatusMessageProps = {
   openAIInputCursorOffset: number
   setOpenAIInputCursorOffset(offset: number): void
   handleOpenAISetupSubmit(value: string): Promise<void>
+  handleModelSelect(model: string): Promise<void>
 }
 
 function OAuthStatusMessage({
@@ -686,6 +964,7 @@ function OAuthStatusMessage({
   openAIInputCursorOffset,
   setOpenAIInputCursorOffset,
   handleOpenAISetupSubmit,
+  handleModelSelect,
 }: OAuthStatusMessageProps): React.ReactNode {
   const openAICompatiblePrompt = useMemo(() => {
     if (oauthStatus.state !== 'openai_setup') {
@@ -710,9 +989,9 @@ function OAuthStatusMessage({
     }
 
     return {
-      title: 'Enter the default model ID to use',
+      title: 'Enter a custom model ID',
       subtitle:
-        'Examples: deepseek-v4-flash, deepseek-v4-pro, qwen-plus, qwen-max, gpt-4.1, or your gateway-specific model ID.',
+        'Enter any model ID supported by this provider (e.g. deepseek-chat, qwen-max, gpt-4.1).',
       mask: undefined,
     }
   }, [oauthStatus])
@@ -774,7 +1053,7 @@ function OAuthStatusMessage({
                     <Text>
                       OpenAI-compatible API key ·{' '}
                       <Text dimColor={true}>
-                        DeepSeek, Qwen, Aliyun, or custom gateway
+                        DeepSeek, Qwen, Zhipu, Moonshot, MiniMax, or custom
                       </Text>
                     </Text>
                   ),
@@ -887,6 +1166,38 @@ function OAuthStatusMessage({
       )
 
     case 'openai_setup':
+      if (oauthStatus.step === 'model_select') {
+        const presetModels = getPresetModels(oauthStatus.preset)
+        const modelSelectOptions = [
+          ...presetModels,
+          {
+            value: '__custom__',
+            label: (
+              <Text dimColor={true}>Enter custom model ID…</Text>
+            ),
+          },
+        ]
+        return (
+          <Box flexDirection="column" gap={1}>
+            <Text bold={true}>Choose a model</Text>
+            <Text dimColor={true}>
+              Select a preset model or enter a custom model ID.
+            </Text>
+            <Box>
+              <Select
+                options={modelSelectOptions}
+                onChange={value => {
+                  void handleModelSelect(value)
+                }}
+                onCancel={() =>
+                  setOAuthStatus({ ...oauthStatus, step: 'api_key' })
+                }
+              />
+            </Box>
+          </Box>
+        )
+      }
+
       return (
         <Box flexDirection="column" gap={1}>
           <Text bold={true}>{openAICompatiblePrompt?.title}</Text>
