@@ -27,6 +27,10 @@ import { logError } from '../utils/log.js'
 import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { Select } from './CustomSelect/select.js'
 import { KeyboardShortcutHint } from './design-system/KeyboardShortcutHint.js'
+import {
+  OPENAI_COMPATIBLE_PRESETS,
+  type OpenAICompatiblePreset,
+} from './openAICompatibleProviders.js'
 import { Spinner } from './Spinner.js'
 import TextInput from './TextInput.js'
 
@@ -37,15 +41,13 @@ type Props = {
   forceLoginMethod?: 'claudeai' | 'console'
 }
 
-type OpenAICompatiblePreset = 'openai' | 'deepseek' | 'qwen' | 'custom'
-
 type OpenAICompatibleSetupState = {
   state: 'openai_setup'
   preset: OpenAICompatiblePreset
   baseUrl: string
   apiKey: string
   model: string
-  step: 'base_url' | 'api_key' | 'model'
+  step: 'base_url' | 'api_key' | 'model_select' | 'model'
 }
 
 type OAuthStatus =
@@ -63,53 +65,13 @@ type OAuthStatus =
 
 const PASTE_HERE_MSG = 'Paste code here if prompted > '
 
-const OPENAI_COMPATIBLE_PRESETS: Array<{
-  value: OpenAICompatiblePreset
-  label: React.ReactNode
-  baseUrl: string
-  model: string
-}> = [
-  {
-    value: 'deepseek',
-    label: (
-      <Text>
-        DeepSeek API · <Text dimColor={true}>OpenAI-compatible</Text>
-      </Text>
-    ),
-    baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
-  },
-  {
-    value: 'qwen',
-    label: (
-      <Text>
-        Qwen / DashScope · <Text dimColor={true}>Aliyun compatible-mode</Text>
-      </Text>
-    ),
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
-  },
-  {
-    value: 'openai',
-    label: (
-      <Text>
-        OpenAI API · <Text dimColor={true}>Official OpenAI-compatible API</Text>
-      </Text>
-    ),
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4.1',
-  },
-  {
-    value: 'custom',
-    label: (
-      <Text>
-        Custom endpoint · <Text dimColor={true}>Any OpenAI-compatible gateway</Text>
-      </Text>
-    ),
-    baseUrl: '',
-    model: '',
-  },
-]
+function getPresetModels(
+  preset: OpenAICompatiblePreset,
+): Array<{ value: string; label: React.ReactNode }> {
+  return (
+    OPENAI_COMPATIBLE_PRESETS.find(p => p.value === preset)?.models ?? []
+  )
+}
 
 function createOpenAISetupState(
   preset: OpenAICompatiblePreset,
@@ -123,7 +85,7 @@ function createOpenAISetupState(
     preset,
     baseUrl: selectedPreset?.baseUrl ?? '',
     apiKey: '',
-    model: selectedPreset?.model ?? '',
+    model: selectedPreset?.defaultModel ?? '',
     step: preset === 'custom' ? 'base_url' : 'api_key',
   }
 }
@@ -481,7 +443,7 @@ export function ConsoleOAuthFlow({
         setOAuthStatus({
           ...oauthStatus,
           apiKey: trimmed,
-          step: 'model',
+          step: getPresetModels(oauthStatus.preset).length > 0 ? 'model_select' : 'model',
         })
         return
       }
@@ -503,12 +465,40 @@ export function ConsoleOAuthFlow({
     [oauthStatus, saveOpenAICompatibleConfig],
   )
 
+  const handleModelSelect = useCallback(
+    async (modelValue: string) => {
+      if (oauthStatus.state !== 'openai_setup') {
+        return
+      }
+      if (modelValue === '__custom__') {
+        setOAuthStatus({
+          ...oauthStatus,
+          step: 'model',
+        })
+        return
+      }
+      await saveOpenAICompatibleConfig({
+        ...oauthStatus,
+        model: modelValue,
+      })
+    },
+    [oauthStatus, saveOpenAICompatibleConfig],
+  )
+
   const handleOpenAISetupCancel = useCallback(() => {
     if (oauthStatus.state !== 'openai_setup') {
       return
     }
 
     if (oauthStatus.step === 'model') {
+      setOAuthStatus({
+        ...oauthStatus,
+        step: getPresetModels(oauthStatus.preset).length > 0 ? 'model_select' : 'api_key',
+      })
+      return
+    }
+
+    if (oauthStatus.step === 'model_select') {
       setOAuthStatus({
         ...oauthStatus,
         step: 'api_key',
@@ -638,6 +628,7 @@ export function ConsoleOAuthFlow({
           openAIInputCursorOffset={openAIInputCursorOffset}
           setOpenAIInputCursorOffset={setOpenAIInputCursorOffset}
           handleOpenAISetupSubmit={handleOpenAISetupSubmit}
+          handleModelSelect={handleModelSelect}
         />
       </Box>
     </Box>
@@ -664,6 +655,7 @@ type OAuthStatusMessageProps = {
   openAIInputCursorOffset: number
   setOpenAIInputCursorOffset(offset: number): void
   handleOpenAISetupSubmit(value: string): Promise<void>
+  handleModelSelect(model: string): Promise<void>
 }
 
 function OAuthStatusMessage({
@@ -686,6 +678,7 @@ function OAuthStatusMessage({
   openAIInputCursorOffset,
   setOpenAIInputCursorOffset,
   handleOpenAISetupSubmit,
+  handleModelSelect,
 }: OAuthStatusMessageProps): React.ReactNode {
   const openAICompatiblePrompt = useMemo(() => {
     if (oauthStatus.state !== 'openai_setup') {
@@ -710,9 +703,9 @@ function OAuthStatusMessage({
     }
 
     return {
-      title: 'Enter the default model ID to use',
+      title: 'Enter a custom model ID',
       subtitle:
-        'Examples: deepseek-v4-flash, deepseek-v4-pro, qwen-plus, qwen-max, gpt-4.1, or your gateway-specific model ID.',
+        'Enter any model ID supported by this provider (e.g. deepseek-chat, qwen-max, gpt-4.1).',
       mask: undefined,
     }
   }, [oauthStatus])
@@ -774,7 +767,7 @@ function OAuthStatusMessage({
                     <Text>
                       OpenAI-compatible API key ·{' '}
                       <Text dimColor={true}>
-                        DeepSeek, Qwen, Aliyun, or custom gateway
+                        DeepSeek, Qwen, Zhipu, Moonshot, MiniMax, or custom
                       </Text>
                     </Text>
                   ),
@@ -887,6 +880,38 @@ function OAuthStatusMessage({
       )
 
     case 'openai_setup':
+      if (oauthStatus.step === 'model_select') {
+        const presetModels = getPresetModels(oauthStatus.preset)
+        const modelSelectOptions = [
+          ...presetModels,
+          {
+            value: '__custom__',
+            label: (
+              <Text dimColor={true}>Enter custom model ID…</Text>
+            ),
+          },
+        ]
+        return (
+          <Box flexDirection="column" gap={1}>
+            <Text bold={true}>Choose a model</Text>
+            <Text dimColor={true}>
+              Select a preset model or enter a custom model ID.
+            </Text>
+            <Box>
+              <Select
+                options={modelSelectOptions}
+                onChange={value => {
+                  void handleModelSelect(value)
+                }}
+                onCancel={() =>
+                  setOAuthStatus({ ...oauthStatus, step: 'api_key' })
+                }
+              />
+            </Box>
+          </Box>
+        )
+      }
+
       return (
         <Box flexDirection="column" gap={1}>
           <Text bold={true}>{openAICompatiblePrompt?.title}</Text>
