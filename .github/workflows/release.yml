@@ -18,13 +18,13 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: dist/cli
-            asset_name: cli-linux
+            asset_name: cli-linux-x64
           - os: macos-latest
             artifact: dist/cli
-            asset_name: cli-macos
+            asset_name: cli-darwin-arm64
           - os: windows-latest
             artifact: dist/cli.exe
-            asset_name: cli-windows.exe
+            asset_name: cli-win32-x64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build binary
-        # Produces 'cli' on Linux/macOS and 'cli.exe' on Windows (see matrix artifact field)
+        # Produces 'dist/cli' on Linux/macOS and 'dist/cli.exe' on Windows
         run: bun run build
 
       - name: Upload binary artifact

@@ -1,0 +1,12 @@
+{
+  "name": "@claude-code-fork/cli-win32-x64",
+  "version": "2.1.87",
+  "description": "Windows x64 binary for @claude-code-fork/claude-code",
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": [
+    "claude-code-fork.exe"
+  ],
+  "preferUnplugged": true
+}
