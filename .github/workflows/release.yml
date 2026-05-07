@@ -17,13 +17,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact: cli
+            artifact: dist/cli
             asset_name: cli-linux
           - os: macos-latest
-            artifact: cli
+            artifact: dist/cli
             asset_name: cli-macos
           - os: windows-latest
-            artifact: cli.exe
+            artifact: dist/cli.exe
             asset_name: cli-windows.exe
 
     steps:

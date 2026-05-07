@@ -114,8 +114,8 @@ const outfile = compile
     ? './dist/cli-dev'
     : './dist/cli'
   : dev
-    ? './cli-dev'
-    : './cli'
+    ? './dist/cli-dev'
+    : './dist/cli'
 const buildTime = new Date().toISOString()
 const version = dev ? getDevVersion(pkg.version) : pkg.version
 

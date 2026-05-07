@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isWindows = process.platform === 'win32';
 const binaryName = isWindows ? 'cli.exe' : 'cli';
-const binaryPath = join(__dirname, '..', binaryName);
+const binaryPath = join(__dirname, '..', 'dist', binaryName);
 
 const result = spawnSync(binaryPath, process.argv.slice(2), {
   stdio: 'inherit',
