@@ -3,6 +3,7 @@
 import type { ServerConfig } from './types.js'
 import type { SessionManager } from './sessionManager.js'
 import type { ServerLogger } from './serverLog.js'
+import { getWebUIHtml } from './webUI.js'
 
 type StartedServer = {
   port?: number
@@ -25,12 +26,16 @@ function isAuthorized(req: Request, authToken?: string): boolean {
   if (!authToken) {
     return true
   }
+  // Check Authorization header first
   const raw = req.headers.get('authorization')
-  if (!raw || !raw.toLowerCase().startsWith('bearer ')) {
-    return false
+  if (raw && raw.toLowerCase().startsWith('bearer ')) {
+    return raw.slice(7) === authToken
   }
-  const token = raw.slice(7)
-  return token === authToken
+  // Fall back to ?token= query parameter (needed for browser WebSocket which
+  // cannot set custom headers).
+  const urlObj = new URL(req.url)
+  const queryToken = urlObj.searchParams.get('token')
+  return queryToken === authToken
 }
 
 function getWsUrl(req: Request, config: ServerConfig, sessionId: string): string {
@@ -77,11 +82,28 @@ export function startServer(
 ): StartedServer {
   sessionManager.setLogger(logger)
 
+  // Lazily compute web UI HTML so it is only generated when web mode is on.
+  let webUIHtmlCache: string | null = null
+  const getWebUI = (): string => {
+    if (webUIHtmlCache === null) {
+      webUIHtmlCache = getWebUIHtml(config.authToken)
+    }
+    return webUIHtmlCache
+  }
+
   const fetchHandler: Bun.Serve.Options<{ sessionId: string }>['fetch'] = async (req, srv) => {
     const url = new URL(req.url)
 
     if (url.pathname === '/health') {
       return new Response('ok')
+    }
+
+    // Serve the web UI at the root path when webUI is enabled.
+    if (config.webUI && (url.pathname === '/' || url.pathname === '/chat')) {
+      return new Response(getWebUI(), {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })
     }
 
     if (url.pathname === '/sessions') {
