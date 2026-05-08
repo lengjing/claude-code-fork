@@ -62,6 +62,8 @@ class AsyncStringQueue implements AsyncIterable<string>, AsyncIterator<string> {
 }
 
 class SessionStructuredIO extends StructuredIO {
+  override readonly isExternalIO: boolean = true
+
   constructor(
     private readonly queue: AsyncStringQueue,
     private readonly onWrite: (line: string) => void,

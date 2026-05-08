@@ -886,7 +886,7 @@ export async function runHeadless(
       if (transformed) {
         await structuredIO.write(transformed)
       }
-    } else if (options.outputFormat === 'stream-json' && options.verbose) {
+    } else if (options.outputFormat === 'stream-json' && (options.verbose || isUsingExternalStructuredIO)) {
       await structuredIO.write(message)
     }
     // Should not be getting control messages or stream events in non-stream mode.
@@ -973,9 +973,13 @@ export async function runHeadless(
     await extractMemoriesModule!.drainPendingExtraction()
   }
 
-  gracefulShutdownSync(
-    lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0,
-  )
+  // In server mode (external structuredIO), the caller owns the process lifetime.
+  // Calling gracefulShutdownSync would schedule process.exit() and kill the server.
+  if (!isUsingExternalStructuredIO) {
+    gracefulShutdownSync(
+      lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0,
+    )
+  }
 }
 
 function runHeadlessStreaming(
@@ -2451,7 +2455,12 @@ function runHeadlessStreaming(
         // If we can't emit the error result, continue with shutdown anyway
       }
       suggestionState.abortController?.abort()
-      gracefulShutdownSync(1)
+      // In server mode (external IO), don't kill the process on error — the
+      // session will close via InProcessSessionChild.finish() and the server
+      // continues serving other sessions.
+      if (!structuredIO.isExternalIO) {
+        gracefulShutdownSync(1)
+      }
       return
     } finally {
       runPhase = 'finally_flush'
@@ -4138,6 +4147,11 @@ function runHeadlessStreaming(
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
+      // In server mode, remove the SIGINT handler registered for this session.
+      // Without cleanup, each session adds a handler and SIGINT fires all of them.
+      if (structuredIO.isExternalIO) {
+        process.off('SIGINT', sigintHandler)
+      }
       output.done()
     }
   })()
