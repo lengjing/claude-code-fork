@@ -776,8 +776,12 @@ export async function runHeadless(
     typeof options.resume === 'string' &&
     (Boolean(validateUuid(options.resume)) || options.resume.endsWith('.jsonl'))
   const isUsingSdkUrl = Boolean(options.sdkUrl)
+  // When structuredIO is supplied by the caller (e.g., server DangerousBackend), input
+  // arrives over the WebSocket message loop — no stdin prompt is needed and the verbose
+  // constraint on stream-json does not apply.
+  const isUsingExternalStructuredIO = Boolean(options.structuredIO)
 
-  if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
+  if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl && !isUsingExternalStructuredIO) {
     process.stderr.write(
       `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
     )
@@ -785,7 +789,7 @@ export async function runHeadless(
     return
   }
 
-  if (options.outputFormat === 'stream-json' && !options.verbose) {
+  if (options.outputFormat === 'stream-json' && !options.verbose && !isUsingExternalStructuredIO) {
     process.stderr.write(
       'Error: When using --print, --output-format=stream-json requires --verbose\n',
     )
