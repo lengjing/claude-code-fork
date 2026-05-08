@@ -814,6 +814,7 @@ export function getWebUIHtml(authToken: string | undefined): string {
       inputEl.disabled = true;
       setRunning(false);
       appendInfoMsg('连接已断开，请刷新页面重新连接');
+      newSessionBtn.style.display = 'flex';
     };
 
     ws.onerror = () => {
@@ -988,12 +989,6 @@ export function getWebUIHtml(authToken: string | undefined): string {
     if (emptyState) { messagesEl.appendChild(emptyState); emptyState.style.display = ''; }
     newSessionBtn.style.display = 'none';
     createSession();
-  });
-
-  // After connection drops, show new-session button
-  const origOnClose = ws?.onclose;
-  Object.defineProperty(ws || {}, 'onclose', {
-    set(fn) { /* handled separately */ }
   });
 
   // ── Init ──────────────────────────────────────────────────────────────────
