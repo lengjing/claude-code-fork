@@ -21,6 +21,8 @@ export type ServerConfig = {
   maxSessions?: number
   /** Default workspace directory for sessions that don't specify cwd. */
   workspace?: string
+  /** When true, serve the web-based chat UI at the root HTTP path. */
+  webUI?: boolean
 }
 
 export type SessionState =

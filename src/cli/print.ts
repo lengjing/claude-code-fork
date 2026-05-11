@@ -489,6 +489,7 @@ export async function runHeadless(
     setupTrigger?: 'init' | 'maintenance' | undefined
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     setSDKStatus?: (status: SDKStatus) => void
+    lifecycleOwner?: 'process' | 'server'
     structuredIO?: StructuredIO
   },
 ): Promise<void> {
@@ -776,8 +777,14 @@ export async function runHeadless(
     typeof options.resume === 'string' &&
     (Boolean(validateUuid(options.resume)) || options.resume.endsWith('.jsonl'))
   const isUsingSdkUrl = Boolean(options.sdkUrl)
+  const isServerOwnedLifecycle = options.lifecycleOwner === 'server'
 
-  if (!inputPrompt && !hasValidResumeSessionId && !isUsingSdkUrl) {
+  if (
+    !inputPrompt &&
+    !hasValidResumeSessionId &&
+    !isUsingSdkUrl &&
+    !isServerOwnedLifecycle
+  ) {
     process.stderr.write(
       `Error: Input must be provided either through stdin or as a prompt argument when using --print\n`,
     )
@@ -785,7 +792,11 @@ export async function runHeadless(
     return
   }
 
-  if (options.outputFormat === 'stream-json' && !options.verbose) {
+  if (
+    options.outputFormat === 'stream-json' &&
+    !options.verbose &&
+    !isServerOwnedLifecycle
+  ) {
     process.stderr.write(
       'Error: When using --print, --output-format=stream-json requires --verbose\n',
     )
@@ -882,7 +893,10 @@ export async function runHeadless(
       if (transformed) {
         await structuredIO.write(transformed)
       }
-    } else if (options.outputFormat === 'stream-json' && options.verbose) {
+    } else if (
+      options.outputFormat === 'stream-json' &&
+      (options.verbose || isServerOwnedLifecycle)
+    ) {
       await structuredIO.write(message)
     }
     // Should not be getting control messages or stream events in non-stream mode.
@@ -969,9 +983,12 @@ export async function runHeadless(
     await extractMemoriesModule!.drainPendingExtraction()
   }
 
-  gracefulShutdownSync(
-    lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0,
-  )
+  // In server-owned mode, the caller owns process lifetime.
+  if (!isServerOwnedLifecycle) {
+    gracefulShutdownSync(
+      lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0,
+    )
+  }
 }
 
 function runHeadlessStreaming(
@@ -1005,9 +1022,11 @@ function runHeadlessStreaming(
     setSDKStatus?: (status: SDKStatus) => void
     promptSuggestions?: boolean | undefined
     workload?: string | undefined
+    lifecycleOwner?: 'process' | 'server'
   },
   turnInterruptionState?: TurnInterruptionState,
 ): AsyncIterable<StdoutMessage> {
+  const isServerOwnedLifecycle = options.lifecycleOwner === 'server'
   let running = false
   let runPhase:
     | 'draining_commands'
@@ -2447,7 +2466,10 @@ function runHeadlessStreaming(
         // If we can't emit the error result, continue with shutdown anyway
       }
       suggestionState.abortController?.abort()
-      gracefulShutdownSync(1)
+      // In server-owned mode, don't kill the process on session error.
+      if (!isServerOwnedLifecycle) {
+        gracefulShutdownSync(1)
+      }
       return
     } finally {
       runPhase = 'finally_flush'
@@ -4134,6 +4156,10 @@ function runHeadlessStreaming(
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
+      // In server-owned mode, remove per-session SIGINT handler to avoid leaks.
+      if (isServerOwnedLifecycle) {
+        process.off('SIGINT', sigintHandler)
+      }
       output.done()
     }
   })()
@@ -4449,7 +4475,7 @@ async function handleInitializeRequest(
   if (request.jsonSchema) {
     setInitJsonSchema(request.jsonSchema)
   }
-  const initResponse: SDKControlInitializeResponse = {
+  const initResponse: SDKControlInitializeResponse & { session_id: string } = {
     commands: commands
       .filter(cmd => cmd.userInvocable !== false)
       .map(cmd => ({
@@ -4477,6 +4503,7 @@ async function handleInitializeRequest(
       // in" (firstParty + tokenSource:none) from "3P, login not applicable".
       apiProvider: getAPIProvider(),
     },
+    session_id: getSessionId(),
     pid: process.pid,
   }
 

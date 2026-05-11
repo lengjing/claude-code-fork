@@ -21,6 +21,10 @@ export type SessionBackend = {
 }
 
 export type ListedSession = SessionInfo & {
+  /**
+   * API-facing session projection used by list endpoints and web UI.
+   * This type must remain serializable and never hold process/socket handles.
+   */
   active: boolean
   attachedClients: number
   status: 'running' | 'detached' | 'persisted'
@@ -28,11 +32,15 @@ export type ListedSession = SessionInfo & {
 }
 
 type ActiveSession = {
+  /**
+   * Runtime-only session state held in memory while server is alive.
+   * Owns child process, attached websocket clients, timers, and write queue.
+   */
   id: string
   workDir: string
   createdAt: number
   lastActiveAt: number
-  clients: Set<Bun.WebSocket>
+  clients: Set<Bun.ServerWebSocket<{ sessionId: string }>>
   child: ServerSessionProcess
   idleTimer: ReturnType<typeof setTimeout> | null
   /**
@@ -64,9 +72,22 @@ function parseStructuredLine(line: string): Record<string, unknown> | null {
 
 function extractSessionIdFromLine(line: string): string | null {
   const parsed = parseStructuredLine(line)
-  return typeof parsed?.session_id === 'string' && parsed.session_id.length > 0
-    ? parsed.session_id
-    : null
+  if (typeof parsed?.session_id === 'string' && parsed.session_id.length > 0) {
+    return parsed.session_id
+  }
+
+  const response = parsed?.response as Record<string, unknown> | undefined
+  if (response?.subtype === 'success') {
+    const successPayload = response.response as Record<string, unknown> | undefined
+    if (
+      typeof successPayload?.session_id === 'string' &&
+      successPayload.session_id.length > 0
+    ) {
+      return successPayload.session_id
+    }
+  }
+
+  return null
 }
 
 function extractUserText(msg: Record<string, unknown>): string {
@@ -117,6 +138,39 @@ export class SessionManager {
     const session = await this.initializeSession(child, workDir)
 
     return { id: session.id, workDir }
+  }
+
+  async wakeSession(opts: {
+    sessionId: string
+    cwd?: string
+    dangerouslySkipPermissions?: boolean
+  }): Promise<{ id: string; workDir: string; resumed: boolean }> {
+    const active = this.sessions.get(opts.sessionId)
+    if (active) {
+      this.clearIdleTimer(active)
+      this.markSessionActive(active)
+      return { id: active.id, workDir: active.workDir, resumed: false }
+    }
+
+    const maxSessions = this.options.maxSessions ?? 0
+    if (maxSessions > 0 && this.sessions.size >= maxSessions) {
+      throw new Error(`Maximum number of sessions (${maxSessions}) reached`)
+    }
+
+    const resolved = await resolveSessionFilePath(opts.sessionId, opts.cwd)
+    if (!resolved) {
+      throw new Error(`Session not found: ${opts.sessionId}`)
+    }
+
+    const sessionCwd = resolved.projectPath ?? opts.cwd ?? process.cwd()
+    const { child, workDir } = await this.backend.spawnSession({
+      cwd: sessionCwd,
+      dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+      resumeSessionId: opts.sessionId,
+    })
+    const session = await this.initializeSession(child, workDir, opts.sessionId)
+
+    return { id: session.id, workDir: session.workDir, resumed: true }
   }
 
   async listSessions({
@@ -172,7 +226,10 @@ export class SessionManager {
     return this.sessions.has(sessionId)
   }
 
-  attachClient(sessionId: string, ws: Bun.WebSocket): boolean {
+  attachClient(
+    sessionId: string,
+    ws: Bun.ServerWebSocket<{ sessionId: string }>,
+  ): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     this.clearIdleTimer(session)
@@ -247,7 +304,10 @@ export class SessionManager {
     session.child.stdin.write(payload + '\n')
   }
 
-  detachClient(sessionId: string, ws: Bun.WebSocket): void {
+  detachClient(
+    sessionId: string,
+    ws: Bun.ServerWebSocket<{ sessionId: string }>,
+  ): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session.clients.delete(ws)
@@ -273,6 +333,7 @@ export class SessionManager {
   private async initializeSession(
     child: ServerSessionProcess,
     workDir: string,
+    expectedSessionId?: string,
   ): Promise<ActiveSession> {
     const createdAt = Date.now()
 
@@ -311,6 +372,12 @@ export class SessionManager {
           if (!sessionId) {
             this.logger?.warn(
               `dropping pre-init session output without session_id: ${trimmed}`,
+            )
+            return
+          }
+          if (expectedSessionId && sessionId !== expectedSessionId) {
+            rejectBeforeReady(
+              `Session resumed with unexpected ID (expected ${expectedSessionId}, got ${sessionId})`,
             )
             return
           }
