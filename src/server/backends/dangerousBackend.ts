@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
+import { randomUUID } from 'crypto'
 import { StructuredIO } from '../../cli/structuredIO.js'
 import { runHeadless } from '../../cli/print.js'
 import { ndjsonSafeStringify } from '../../cli/ndjsonSafeStringify.js'
@@ -62,8 +63,6 @@ class AsyncStringQueue implements AsyncIterable<string>, AsyncIterator<string> {
 }
 
 class SessionStructuredIO extends StructuredIO {
-  override readonly isExternalIO: boolean = true
-
   constructor(
     private readonly queue: AsyncStringQueue,
     private readonly onWrite: (line: string) => void,
@@ -167,6 +166,16 @@ class InProcessSessionChild
   }
 
   start(): void {
+    this.sessionStructuredIO.pushInput(
+      ndjsonSafeStringify({
+        type: 'control_request',
+        request_id: randomUUID(),
+        request: {
+          subtype: 'initialize',
+        },
+      }) + '\n',
+    )
+
     void this.deps.createRuntime(this.opts)
       .then(runtime => runHeadless(
         '',
@@ -197,13 +206,14 @@ class InProcessSessionChild
           teleport: undefined,
           sdkUrl: undefined,
           replayUserMessages: false,
-          includePartialMessages: false,
+          includePartialMessages: true,
           forkSession: false,
           rewindFiles: undefined,
           enableAuthStatus: runtime.baseOptions.enableAuthStatus,
           agent: runtime.baseOptions.agent,
           workload: runtime.baseOptions.workload,
           setSDKStatus: runtime.baseOptions.setSDKStatus,
+          lifecycleOwner: 'server',
           structuredIO: this.sessionStructuredIO,
         },
       ))

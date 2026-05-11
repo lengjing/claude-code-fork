@@ -136,14 +136,6 @@ export class StructuredIO {
   readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
 
-  /**
-   * True when this StructuredIO is owned by an external caller (e.g. the
-   * in-process DangerousBackend server). In that mode, runHeadless /
-   * runHeadlessStreaming must NOT call gracefulShutdownSync — the caller owns
-   * the process lifetime.
-   */
-  readonly isExternalIO: boolean = false
-
   // CCR external_metadata read back on worker start; null when the
   // transport doesn't restore. Assigned by RemoteIO.
   restoredWorkerState: Promise<SessionExternalMetadata | null> =

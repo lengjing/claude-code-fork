@@ -3995,7 +3995,7 @@ async function run(): Promise<CommanderCommand> {
       authToken,
       unix: opts.unix,
       workspace: opts.workspace,
-      idleTimeoutMs: parseInt(opts.idleTimeout ?? '600000', 10),
+      idleTimeoutMs: parseInt(opts.idleTimeout ?? '5000', 10),
       maxSessions: parseInt(opts.maxSessions ?? '32', 10)
     };
     const sessionCwd = opts.workspace || getCwd();
@@ -4126,6 +4126,10 @@ async function run(): Promise<CommanderCommand> {
     const {
       createServerLogger
     } = await import('./server/serverLog.js');
+    const {
+      writeServerLock,
+      removeServerLock
+    } = await import('./server/lockfile.js');
 
     const authToken = opts.auth === false ? undefined : `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
     const port = parseInt(opts.port ?? '0', 10);
@@ -4200,6 +4204,13 @@ async function run(): Promise<CommanderCommand> {
     const server = startServer(config, sessionManager, logger);
     const actualPort = server.port ?? port;
     const webUrl = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${actualPort}`;
+    await writeServerLock({
+      pid: process.pid,
+      port: actualPort,
+      host,
+      httpUrl: webUrl,
+      startedAt: Date.now()
+    });
 
     process.stderr.write('Claude Code Web 界面已启动\n');
     process.stderr.write(`访问地址: ${webUrl}\n`);
@@ -4233,6 +4244,7 @@ async function run(): Promise<CommanderCommand> {
       shuttingDown = true;
       server.stop(true);
       await sessionManager.destroyAll();
+      await removeServerLock();
       process.exit(0);
     };
     process.once('SIGINT', () => void shutdown());
