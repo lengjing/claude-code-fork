@@ -362,17 +362,26 @@ export function startServer(
     },
   }
 
+  // When the dashboard is active we need SSE connections to stay open
+  // indefinitely.  Bun's default idle timeout is 10 s, which is shorter than
+  // the 8 s SSE keepalive interval, causing the browser to see repeated
+  // "event stream interrupted" disconnections.  Setting idleTimeout to 0
+  // disables the per-connection timeout entirely for this server instance.
+  const idleTimeout = config.dashboard ? 0 : undefined
+
   const server = config.unix
     ? Bun.serve<{ sessionId: string }>({
         unix: config.unix,
         fetch: fetchHandler,
         websocket: websocketHandler,
+        ...(idleTimeout !== undefined ? { idleTimeout } : {}),
       })
     : Bun.serve<{ sessionId: string }>({
         port: config.port,
         hostname: config.host,
         fetch: fetchHandler,
         websocket: websocketHandler,
+        ...(idleTimeout !== undefined ? { idleTimeout } : {}),
       })
 
   logger.info(

@@ -12,9 +12,9 @@
  *     on first submit if none exists
  */
 
-import { readdir, readFile, stat } from 'fs/promises'
+import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
-import { join, dirname } from 'path'
+import { join, dirname, resolve, sep } from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
@@ -25,6 +25,13 @@ import type { ServerConfig } from './types.js'
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** Format a byte count as a human-readable string (B / KB / MB). */
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
 
 type DashEvent =
   | { kind: 'ping' }
@@ -343,6 +350,21 @@ export async function handleDashboardApi(
       version: '2.1.88',
       session: sessionId,
       cwd: getWorkspaceDir(),
+      editMode: 'auto',
+      toolCount: null,
+      mcpServerCount: 0,
+      cockpit: {
+        balance: null,
+        tokens7d: null,
+        cacheHit7d: null,
+        costTrend14d: null,
+        currentSession: null,
+        toolCalls24h: null,
+        recentPlans: null,
+        toolActivity: null,
+      },
+      budgetUsd: null,
+      sessionSpendUsd: null,
     })
   }
 
@@ -520,12 +542,129 @@ export async function handleDashboardApi(
 
   // ── GET /api/usage ───────────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/usage') {
-    return json({ days: [], total: { costUsd: 0, turns: 0, cacheSavingsUsd: 0 } })
+    const claudeHome = getClaudeConfigHomeDir()
+    const projectsDir = getProjectsDir()
+    type UsageRecord = {
+      costUSD?: number
+      inputTokens?: number
+      cacheReadInputTokens?: number
+      outputTokens?: number
+      model?: string
+      startTime?: string
+      // session-jsonl result message fields
+      cost_usd?: number
+      input_tokens?: number
+      cache_read_input_tokens?: number
+      output_tokens?: number
+      timestamp?: string
+      type?: string
+      subtype?: string
+    }
+    const records: UsageRecord[] = []
+    // Try reading a central usage.jsonl first
+    const usageLogPath = join(claudeHome, 'usage.jsonl')
+    let logSize = '0 B'
+    try {
+      const raw = await readFile(usageLogPath, 'utf8')
+      const lines = raw.split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          records.push(JSON.parse(line) as UsageRecord)
+        } catch { /* skip malformed lines */ }
+      }
+      const bytes = Buffer.byteLength(raw)
+      logSize = fmtBytes(bytes)
+    } catch {
+      // usage.jsonl not present — read result lines from session jsonl files
+      try {
+        const entries = await readdir(projectsDir, { recursive: true })
+        for (const e of entries) {
+          if (typeof e !== 'string' || !e.endsWith('.jsonl')) continue
+          try {
+            const raw = await readFile(join(projectsDir, e), 'utf8')
+            for (const line of raw.split('\n')) {
+              if (!line.trim()) continue
+              try {
+                const parsed = JSON.parse(line) as UsageRecord
+                if (parsed.type === 'result' && parsed.subtype === 'success') {
+                  records.push(parsed)
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* skip unreadable files */ }
+        }
+      } catch { /* projects dir may not exist */ }
+      // ~80 bytes per result line is a conservative estimate for a minimal
+      // result JSON object (type, subtype, session_id, cost_usd, timestamps)
+      const totalBytes = records.length * 80
+      logSize = records.length === 0 ? '0 B' : `~${fmtBytes(totalBytes)}`
+    }
+
+    // Aggregate into time buckets
+    const now = Date.now()
+    const MS = { h24: 86400000, d7: 604800000, d30: 2592000000 }
+    type Bucket = { label: string; cutoff: number; turns: number; cacheHitTokens: number; cacheMissTokens: number; costUsd: number; cacheSavingsUsd: number; claudeEquivUsd: number }
+    const buckets: Bucket[] = [
+      { label: 'Last 24 h', cutoff: now - MS.h24, turns: 0, cacheHitTokens: 0, cacheMissTokens: 0, costUsd: 0, cacheSavingsUsd: 0, claudeEquivUsd: 0 },
+      { label: 'Last 7 d',  cutoff: now - MS.d7,  turns: 0, cacheHitTokens: 0, cacheMissTokens: 0, costUsd: 0, cacheSavingsUsd: 0, claudeEquivUsd: 0 },
+      { label: 'Last 30 d', cutoff: now - MS.d30, turns: 0, cacheHitTokens: 0, cacheMissTokens: 0, costUsd: 0, cacheSavingsUsd: 0, claudeEquivUsd: 0 },
+      { label: 'All time',  cutoff: 0,            turns: 0, cacheHitTokens: 0, cacheMissTokens: 0, costUsd: 0, cacheSavingsUsd: 0, claudeEquivUsd: 0 },
+    ]
+    const byModel = new Map<string, number>()
+    for (const r of records) {
+      const cost = r.costUSD ?? r.cost_usd ?? 0
+      const input = r.inputTokens ?? r.input_tokens ?? 0
+      const cacheRead = r.cacheReadInputTokens ?? r.cache_read_input_tokens ?? 0
+      const ts = r.startTime ?? r.timestamp
+      const when = ts ? Date.parse(ts) : 0
+      const model = r.model ?? 'unknown'
+      byModel.set(model, (byModel.get(model) ?? 0) + 1)
+      for (const b of buckets) {
+        if (when >= b.cutoff) {
+          b.turns++
+          b.cacheHitTokens += cacheRead
+          b.cacheMissTokens += input - cacheRead
+          b.costUsd += cost
+        }
+      }
+    }
+    return json({
+      recordCount: records.length,
+      logSize,
+      buckets: buckets.map(b => ({
+        label: b.label,
+        turns: b.turns,
+        cacheHitTokens: b.cacheHitTokens,
+        cacheMissTokens: b.cacheMissTokens,
+        costUsd: b.costUsd,
+        cacheSavingsUsd: b.cacheSavingsUsd,
+        claudeEquivUsd: b.claudeEquivUsd,
+      })),
+      byModel: [...byModel.entries()].sort((a, b) => b[1] - a[1]).map(([model, turns]) => ({ model, turns })),
+    })
+  }
+
+  // ── GET /api/usage/series ────────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/usage/series') {
+    return json({ days: [] })
   }
 
   // ── GET /api/permissions ─────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/permissions') {
-    return json({ allowed: [], denied: [] })
+    return json({
+      editMode: 'auto',
+      currentCwd: getWorkspaceDir(),
+      project: [] as string[],
+      builtin: [
+        'Read file', 'Write file', 'Execute bash', 'List directory',
+        'Search files', 'Edit file', 'Create file', 'Delete file',
+      ],
+    })
+  }
+
+  // ── POST /api/permissions ─────────────────────────────────────────────────
+  if (req.method === 'POST' && apiPath === '/permissions') {
+    return json({ ok: true, alreadyPresent: false })
   }
 
   // ── DELETE /api/permissions ──────────────────────────────────────────────
@@ -533,19 +672,117 @@ export async function handleDashboardApi(
     return json({ ok: true })
   }
 
-  // ── GET /api/memory ──────────────────────────────────────────────────────
-  if (req.method === 'GET' && apiPath === '/memory') {
-    return json({ files: [] })
+  // ── POST /api/permissions/clear ───────────────────────────────────────────
+  if (req.method === 'POST' && apiPath === '/permissions/clear') {
+    return json({ ok: true, dropped: 0 })
   }
 
-  // ── POST /api/memory/* ───────────────────────────────────────────────────
-  if (req.method === 'POST' && apiPath.startsWith('/memory')) {
+  // ── GET /api/memory ──────────────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/memory') {
+    const claudeHome = getClaudeConfigHomeDir()
+    const memDir = join(claudeHome, 'memory')
+    const cwd = getWorkspaceDir()
+
+    // Global memory files (~/.claude/memory/*.md)
+    const globalFiles: { name: string; size: number; mtime: number }[] = []
+    try {
+      const entries = await readdir(memDir)
+      for (const f of entries) {
+        if (!f.endsWith('.md')) continue
+        try {
+          const s = await stat(join(memDir, f))
+          globalFiles.push({ name: f, size: s.size, mtime: s.mtimeMs })
+        } catch { /* skip */ }
+      }
+    } catch { /* dir may not exist */ }
+
+    // Project CLAUDE.md
+    const projectClaudeMd = join(cwd, 'CLAUDE.md')
+    const projectExists = existsSync(projectClaudeMd)
+
+    return json({
+      project: { path: projectClaudeMd, exists: projectExists },
+      global: { files: globalFiles },
+      projectMem: { path: null, files: [] },
+    })
+  }
+
+  // ── GET /api/memory/project ───────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/memory/project') {
+    const cwd = getWorkspaceDir()
+    const filePath = join(cwd, 'CLAUDE.md')
+    let body = ''
+    try { body = await readFile(filePath, 'utf8') } catch { /* file may not exist */ }
+    return json({ body })
+  }
+
+  // ── POST /api/memory/project ──────────────────────────────────────────────
+  if (req.method === 'POST' && apiPath === '/memory/project') {
+    const cwd = getWorkspaceDir()
+    const filePath = join(cwd, 'CLAUDE.md')
+    let body = ''
+    try { body = ((await req.json()) as { body?: string }).body ?? '' } catch { /* ignore */ }
+    try { await writeFile(filePath, body, 'utf8') } catch (err) {
+      return json({ error: String(err) }, 500)
+    }
     return json({ ok: true })
+  }
+
+  // ── GET /api/memory/global/:name ──────────────────────────────────────────
+  const memGlobalReadMatch = apiPath.match(/^\/memory\/global\/(.+)$/)
+  if (req.method === 'GET' && memGlobalReadMatch) {
+    const name = decodeURIComponent(memGlobalReadMatch[1]!)
+    const claudeHome = getClaudeConfigHomeDir()
+    const memDir = resolve(join(claudeHome, 'memory'))
+    const filePath = resolve(join(memDir, name))
+    // Ensure the resolved path is strictly inside the memory directory
+    if (!filePath.startsWith(memDir + sep)) {
+      return json({ error: 'Invalid file name' }, 400)
+    }
+    let body = ''
+    try { body = await readFile(filePath, 'utf8') } catch { /* file may not exist */ }
+    return json({ body })
+  }
+
+  // ── POST /api/memory/global/:name ─────────────────────────────────────────
+  const memGlobalWriteMatch = apiPath.match(/^\/memory\/global\/(.+)$/)
+  if (req.method === 'POST' && memGlobalWriteMatch) {
+    const name = decodeURIComponent(memGlobalWriteMatch[1]!)
+    const claudeHome = getClaudeConfigHomeDir()
+    const memDir = resolve(join(claudeHome, 'memory'))
+    const filePath = resolve(join(memDir, name))
+    // Ensure the resolved path is strictly inside the memory directory
+    if (!filePath.startsWith(memDir + sep)) {
+      return json({ error: 'Invalid file name' }, 400)
+    }
+    let body = ''
+    try { body = ((await req.json()) as { body?: string }).body ?? '' } catch { /* ignore */ }
+    try {
+      await mkdir(memDir, { recursive: true })
+      await writeFile(filePath, body, 'utf8')
+    } catch (err) {
+      return json({ error: String(err) }, 500)
+    }
+    return json({ ok: true })
+  }
+
+  // ── GET/POST /api/memory/project-mem/* ───────────────────────────────────
+  if (apiPath.startsWith('/memory/project-mem')) {
+    return json({ body: '', ok: true })
   }
 
   // ── GET /api/settings ────────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/settings') {
-    return json({ model: null, preset: null, editMode: 'auto', budgetUsd: null })
+    return json({
+      model: null,
+      preset: null,
+      editMode: 'auto',
+      budgetUsd: null,
+      sessionSpendUsd: null,
+      skillPaths: [],
+      search: false,
+      proNext: false,
+    })
   }
 
   // ── POST /api/settings ───────────────────────────────────────────────────
@@ -560,11 +797,71 @@ export async function handleDashboardApi(
 
   // ── GET /api/hooks ───────────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/hooks') {
-    return json({ hooks: [] })
+    const claudeHome = getClaudeConfigHomeDir()
+    const cwd = getWorkspaceDir()
+    const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop']
+
+    // Try reading global settings.json for hooks
+    let globalHooks: Record<string, unknown> = {}
+    const globalSettingsPath = join(claudeHome, 'settings.json')
+    try {
+      const raw = await readFile(globalSettingsPath, 'utf8')
+      const parsed = JSON.parse(raw) as { hooks?: Record<string, unknown> }
+      globalHooks = parsed.hooks ?? {}
+    } catch { /* settings may not exist */ }
+
+    // Try reading project settings.json for hooks
+    let projectHooks: Record<string, unknown> = {}
+    const projectSettingsPath = join(cwd, '.claude', 'settings.json')
+    let projectSettingsExists = false
+    try {
+      const raw = await readFile(projectSettingsPath, 'utf8')
+      const parsed = JSON.parse(raw) as { hooks?: Record<string, unknown> }
+      projectHooks = parsed.hooks ?? {}
+      projectSettingsExists = true
+    } catch { /* may not exist */ }
+
+    return json({
+      resolved: [],
+      events: HOOK_EVENTS,
+      project: {
+        path: projectSettingsExists ? projectSettingsPath : null,
+        hooks: projectHooks,
+      },
+      global: {
+        path: globalSettingsPath,
+        hooks: globalHooks,
+      },
+      recentRuns: [],
+    })
   }
 
-  // ── POST /api/hooks/* ────────────────────────────────────────────────────
-  if (req.method === 'POST' && apiPath.startsWith('/hooks')) {
+  // ── POST /api/hooks/save ──────────────────────────────────────────────────
+  if (req.method === 'POST' && apiPath === '/hooks/save') {
+    let body: { scope?: string; hooks?: unknown } = {}
+    try { body = (await req.json()) as typeof body } catch { /* ignore */ }
+    const scope = body.scope === 'global' ? 'global' : 'project'
+    const claudeHome = getClaudeConfigHomeDir()
+    const cwd = getWorkspaceDir()
+    const settingsPath = scope === 'global'
+      ? join(claudeHome, 'settings.json')
+      : join(cwd, '.claude', 'settings.json')
+    try {
+      let existing: Record<string, unknown> = {}
+      try {
+        existing = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>
+      } catch { /* file may not exist yet */ }
+      existing.hooks = body.hooks ?? {}
+      await mkdir(dirname(settingsPath), { recursive: true })
+      await writeFile(settingsPath, JSON.stringify(existing, null, 2), 'utf8')
+    } catch (err) {
+      return json({ error: String(err) }, 500)
+    }
+    return json({ ok: true })
+  }
+
+  // ── POST /api/hooks/reload ────────────────────────────────────────────────
+  if (req.method === 'POST' && apiPath === '/hooks/reload') {
     return json({ ok: true })
   }
 
@@ -590,12 +887,35 @@ export async function handleDashboardApi(
 
   // ── GET /api/semantic ────────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/semantic') {
-    return json({ enabled: false })
+    return json({
+      attached: false,
+      reason: 'Semantic search is not available in this version of Claude Code.',
+      index: { exists: false },
+      job: null,
+      pull: null,
+    })
+  }
+
+  // ── GET /api/semantic/config ──────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/semantic/config') {
+    // Ollama's standard binding is HTTP on localhost — it does not support
+    // HTTPS natively and is always accessed over a loopback interface.
+    return json({
+      provider: 'ollama',
+      ollama: { baseUrl: 'http://localhost:11434', model: 'nomic-embed-text' },
+      openaiCompat: {
+        baseUrl: '',
+        apiKey: '',
+        apiKeySet: false,
+        model: '',
+        extraBody: {},
+      },
+    })
   }
 
   // ── POST /api/semantic/* ─────────────────────────────────────────────────
   if (req.method === 'POST' && apiPath.startsWith('/semantic')) {
-    return json({ ok: true })
+    return json({ ok: true, error: 'Semantic search is not available in this version.' })
   }
 
   // ── POST /api/loop/start ──────────────────────────────────────────────────
@@ -721,6 +1041,28 @@ export async function handleDashboardApi(
     return json({ accepted: true, sessionId })
   }
 
+  // ── GET /api/models ───────────────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/models') {
+    return json({
+      models: [
+        'claude-opus-4-5',
+        'claude-sonnet-4-5',
+        'claude-haiku-4-5',
+        'claude-opus-4-6',
+        'claude-sonnet-4-6',
+        'claude-3-5-sonnet-20241022',
+        'claude-3-5-haiku-20241022',
+      ],
+      current: null,
+      pricing: {},
+    })
+  }
+
+  // ── GET /api/loop/status ──────────────────────────────────────────────────
+  if (req.method === 'GET' && apiPath === '/loop/status') {
+    return json({ status: null })
+  }
+
   // ── GET /api/events (SSE) ─────────────────────────────────────────────────
   if (req.method === 'GET' && apiPath === '/events') {
     const url = new URL(req.url)
@@ -754,7 +1096,8 @@ export async function handleDashboardApi(
         // Send initial busy-change=false so the UI knows the session is idle
         client.enqueue({ kind: 'busy-change', busy: false })
 
-        // Periodic ping to keep the connection alive
+        // Periodic ping — must fire before Bun's idle timeout (set to 0 in
+        // server.ts, but 8 s is also a safe floor for any reverse proxies)
         pingInterval = setInterval(() => {
           try {
             client.enqueue({ kind: 'ping' })
@@ -762,7 +1105,7 @@ export async function handleDashboardApi(
             clearInterval(pingInterval!)
             sseClients.delete(client)
           }
-        }, 15_000)
+        }, 8_000)
 
         // Clean up when the stream is cancelled (client disconnects)
         // We store cleanup in a WeakRef-friendly closure by reusing `client`
