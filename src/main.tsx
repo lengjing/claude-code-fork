@@ -3956,7 +3956,7 @@ async function run(): Promise<CommanderCommand> {
   });
 
   // claude server
-  const serverCmd = program.command('server').description('Start a Claude Code session server').enablePositionalOptions().option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--no-auth', 'Disable bearer auth for local trusted environments').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').action(async (opts: {
+  const serverCmd = program.command('server').description('Start a Claude Code session server').enablePositionalOptions().option('--port <number>', 'HTTP port', '0').option('--host <string>', 'Bind address', '0.0.0.0').option('--auth-token <token>', 'Bearer token for auth').option('--no-auth', 'Disable bearer auth for local trusted environments').option('--unix <path>', 'Listen on a unix domain socket').option('--workspace <dir>', 'Default working directory for sessions that do not specify cwd').option('--idle-timeout <ms>', 'Idle timeout for detached sessions in ms (0 = never expire)', '600000').option('--max-sessions <n>', 'Maximum concurrent sessions (0 = unlimited)', '32').option('--dashboard', 'Serve the Claude Code dashboard UI at / and expose /api/* endpoints').option('--no-open', 'Do not automatically open the browser when --dashboard is set').action(async (opts: {
     port?: string;
     host?: string;
     authToken?: string;
@@ -3965,6 +3965,8 @@ async function run(): Promise<CommanderCommand> {
     workspace?: string;
     idleTimeout?: string;
     maxSessions?: string;
+    dashboard?: boolean;
+    open: boolean;
   }) => {
     const {
       randomBytes
@@ -3996,7 +3998,8 @@ async function run(): Promise<CommanderCommand> {
       unix: opts.unix,
       workspace: opts.workspace,
       idleTimeoutMs: parseInt(opts.idleTimeout ?? '5000', 10),
-      maxSessions: parseInt(opts.maxSessions ?? '32', 10)
+      maxSessions: parseInt(opts.maxSessions ?? '32', 10),
+      dashboard: opts.dashboard ?? false,
     };
     const sessionCwd = opts.workspace || getCwd();
     let sharedServerRuntimePromise: Promise<{
@@ -4059,6 +4062,28 @@ async function run(): Promise<CommanderCommand> {
     const server = startServer(config, sessionManager, logger);
     const actualPort = server.port ?? config.port;
     printBanner(config, authToken, actualPort);
+
+    // When --dashboard is set, auto-open the browser (unless --no-open)
+    if (config.dashboard && opts.open !== false) {
+      const dashUrl = config.unix
+        ? null
+        : `http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${actualPort}`;
+      if (dashUrl) {
+        try {
+          const { exec } = await import('child_process');
+          const platform = process.platform;
+          const cmd = platform === 'darwin'
+            ? `open "${dashUrl}"`
+            : platform === 'win32'
+              ? `start "" "${dashUrl}"`
+              : `xdg-open "${dashUrl}"`;
+          exec(cmd);
+        } catch {
+          // Best-effort; ignore if browser can't be opened
+        }
+      }
+    }
+
     await writeServerLock({
       pid: process.pid,
       port: actualPort,
@@ -4101,154 +4126,6 @@ async function run(): Promise<CommanderCommand> {
     // can leave event loop handles that prevent natural exit (same pattern as
     // templates and other non-interactive commands in this file).
     process.exit(0);
-  });
-
-  // claude web — start the server and serve a browser-based chat UI
-  program.command('web').description('Start a local web server and open the Claude Code chat interface in your browser').option('--port <number>', 'HTTP port (default: auto-assigned)', '0').option('--host <string>', 'Bind address', '127.0.0.1').option('--no-auth', 'Disable bearer auth (only use on trusted networks)').option('--workspace <dir>', 'Default working directory for sessions').option('--no-open', 'Do not automatically open the browser').action(async (opts: {
-    port?: string;
-    host?: string;
-    auth: boolean;
-    workspace?: string;
-    open: boolean;
-  }) => {
-    const {
-      randomBytes
-    } = await import('crypto');
-    const {
-      startServer
-    } = await import('./server/server.js');
-    const {
-      SessionManager
-    } = await import('./server/sessionManager.js');
-    const {
-      DangerousBackend
-    } = await import('./server/backends/dangerousBackend.js');
-    const {
-      createServerLogger
-    } = await import('./server/serverLog.js');
-    const {
-      writeServerLock,
-      removeServerLock
-    } = await import('./server/lockfile.js');
-
-    const authToken = opts.auth === false ? undefined : `sk-ant-cc-${randomBytes(16).toString('base64url')}`;
-    const port = parseInt(opts.port ?? '0', 10);
-    const host = opts.host ?? '127.0.0.1';
-    const config = {
-      port,
-      host,
-      authToken,
-      workspace: opts.workspace,
-      idleTimeoutMs: 600000,
-      maxSessions: 32,
-      webUI: true,
-    };
-    const sessionCwd = opts.workspace || getCwd();
-    let sharedWebRuntimePromise: Promise<{
-      commands: Awaited<ReturnType<typeof getCommands>>;
-      agentDefinitions: Awaited<ReturnType<typeof getAgentDefinitionsWithOverrides>>;
-      toolPermissionContext: Awaited<ReturnType<typeof initializeToolPermissionContext>>['toolPermissionContext'];
-      tools: ReturnType<typeof getTools>;
-    }> | null = null;
-    const backend = new DangerousBackend({
-      createRuntime: async sessionOpts => {
-        if (!sharedWebRuntimePromise) {
-          sharedWebRuntimePromise = (async () => {
-            enableConfigs();
-            const commands = (await getCommands(sessionCwd)).filter(command => command.type === 'prompt' && !command.disableNonInteractive || command.type === 'local' && command.supportsNonInteractive);
-            const agentDefinitions = await getAgentDefinitionsWithOverrides(sessionCwd);
-            const permissionInit = await initializeToolPermissionContext({
-              allowedToolsCli: [],
-              disallowedToolsCli: [],
-              baseToolsCli: [],
-              permissionMode: 'default',
-              allowDangerouslySkipPermissions: false,
-              addDirs: []
-            });
-            return {
-              commands,
-              agentDefinitions,
-              toolPermissionContext: permissionInit.toolPermissionContext,
-              tools: getTools(permissionInit.toolPermissionContext)
-            };
-          })();
-        }
-        const shared = await sharedWebRuntimePromise;
-        const defaultState = getDefaultAppState();
-        const sessionPermissionContext = sessionOpts.dangerouslySkipPermissions ? {
-          ...shared.toolPermissionContext,
-          mode: 'bypassPermissions'
-        } : shared.toolPermissionContext;
-        const initialState = {
-          ...defaultState,
-          toolPermissionContext: sessionPermissionContext,
-          agentDefinitions: shared.agentDefinitions
-        };
-        const store = createStore(initialState, onChangeAppState);
-        return {
-          commands: shared.commands,
-          tools: shared.tools,
-          sdkMcpConfigs: {},
-          agents: shared.agentDefinitions.activeAgents,
-          getAppState: () => store.getState(),
-          setAppState: store.setState,
-          baseOptions: {}
-        };
-      }
-    });
-    const sessionManager = new SessionManager(backend, {
-      idleTimeoutMs: config.idleTimeoutMs,
-      maxSessions: config.maxSessions
-    });
-    const logger = createServerLogger();
-    const server = startServer(config, sessionManager, logger);
-    const actualPort = server.port ?? port;
-    const webUrl = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${actualPort}`;
-    await writeServerLock({
-      pid: process.pid,
-      port: actualPort,
-      host,
-      httpUrl: webUrl,
-      startedAt: Date.now()
-    });
-
-    process.stderr.write('Claude Code Web 界面已启动\n');
-    process.stderr.write(`访问地址: ${webUrl}\n`);
-    if (authToken) {
-      process.stderr.write(`认证令牌: ${authToken}\n`);
-      process.stderr.write('(令牌已内嵌在页面中，无需手动输入)\n');
-    } else {
-      process.stderr.write('认证: 已禁用 (--no-auth)\n');
-    }
-    process.stderr.write('按 Ctrl+C 停止服务器\n');
-
-    // Try to open the browser automatically
-    if (opts.open !== false) {
-      try {
-        const { exec } = await import('child_process');
-        const platform = process.platform;
-        const cmd = platform === 'darwin'
-          ? `open "${webUrl}"`
-          : platform === 'win32'
-            ? `start "" "${webUrl}"`
-            : `xdg-open "${webUrl}"`;
-        exec(cmd);
-      } catch {
-        // Best-effort; ignore errors if browser can't be opened
-      }
-    }
-
-    let shuttingDown = false;
-    const shutdown = async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      server.stop(true);
-      await sessionManager.destroyAll();
-      await removeServerLock();
-      process.exit(0);
-    };
-    process.once('SIGINT', () => void shutdown());
-    process.once('SIGTERM', () => void shutdown());
   });
 
   // `claude ssh <host> [dir]` — registered here only so --help shows it.

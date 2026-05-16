@@ -31,6 +31,12 @@ export type ListedSession = SessionInfo & {
   lastActiveAt?: number
 }
 
+/**
+ * Callback invoked for each JSON line broadcast from a session.
+ * Used by the dashboard SSE handler to relay events to browser clients.
+ */
+export type SessionLineSubscriber = (sessionId: string, line: string) => void
+
 type ActiveSession = {
   /**
    * Runtime-only session state held in memory while server is alive.
@@ -112,6 +118,11 @@ function extractUserText(msg: Record<string, unknown>): string {
 export class SessionManager {
   private readonly sessions = new Map<string, ActiveSession>()
   private logger: ServerLogger | null = null
+  /**
+   * Global subscribers that receive every broadcast line from any session.
+   * The dashboard SSE handler registers here to relay events to browsers.
+   */
+  private readonly lineSubscribers = new Set<SessionLineSubscriber>()
 
   constructor(
     private readonly backend: SessionBackend,
@@ -123,6 +134,17 @@ export class SessionManager {
 
   setLogger(logger: ServerLogger): void {
     this.logger = logger
+  }
+
+  /**
+   * Register a subscriber that is called for every JSON line broadcast from
+   * any session.  Returns a dispose function to unregister.
+   */
+  subscribeLines(subscriber: SessionLineSubscriber): () => void {
+    this.lineSubscribers.add(subscriber)
+    return () => {
+      this.lineSubscribers.delete(subscriber)
+    }
   }
 
   async createSession(opts: {
@@ -328,6 +350,26 @@ export class SessionManager {
       this.clearIdleTimer(session)
       this.sessions.delete(id)
     }
+  }
+
+  /**
+   * Returns the ID of the most recently active in-memory session, or undefined
+   * if no sessions are running.  Used by the dashboard to route events to the
+   * "current" session when no explicit session ID is provided.
+   */
+  getMostRecentSessionId(): string | undefined {
+    let best: ActiveSession | undefined
+    for (const session of this.sessions.values()) {
+      if (!best || session.lastActiveAt > best.lastActiveAt) {
+        best = session
+      }
+    }
+    return best?.id
+  }
+
+  /** Whether the given session has an in-memory (running/detached) entry. */
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId)
   }
 
   private async initializeSession(
@@ -547,6 +589,14 @@ export class SessionManager {
         this.logger?.warn(
           `failed to send session ${session.id} update to a client: ${String(error)}`,
         )
+      }
+    }
+    // Notify all SSE line subscribers (e.g. dashboard API handler).
+    for (const subscriber of this.lineSubscribers) {
+      try {
+        subscriber(session.id, body)
+      } catch {
+        // best-effort — subscriber errors must not break session broadcast
       }
     }
   }

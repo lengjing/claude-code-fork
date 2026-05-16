@@ -1,3 +1,5 @@
 node_modules/
 dist/
 openclaw/
+dashboard/node_modules/
+dashboard/dist/
