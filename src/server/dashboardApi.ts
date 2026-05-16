@@ -299,7 +299,7 @@ export async function serveDashboardHtml(authToken: string | undefined): Promise
     )
   }
 
-  const indexPath = join(distDir, '..', '..', 'index.html')
+  const indexPath = join(distDir, '..', 'index.html')
   if (!existsSync(indexPath)) {
     return new Response('Dashboard index.html not found', {
       status: 503,
