@@ -4,8 +4,6 @@
  * crisp hairline borders, glowing active states.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
 /* ── Design tokens ──────────────────────────────────────────────────────── */
 :root {
   /* Surfaces */
@@ -1341,5 +1339,3 @@ input:focus, textarea:focus, select:focus {
 .diff-source-toggle .toggle-btn:hover:not(.active), .diff-style-toggle .toggle-btn:hover:not(.active) { background: var(--bg-hover); color: var(--fg-0); }
 .diff-empty { padding: 24px; text-align: center; color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }
 
-/* ── muted duplicate fix ────────────────────────────────────────────────── */
-.muted { color: var(--fg-3); }
