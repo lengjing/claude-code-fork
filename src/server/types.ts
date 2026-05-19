@@ -21,8 +21,12 @@ export type ServerConfig = {
   maxSessions?: number
   /** Default workspace directory for sessions that don't specify cwd. */
   workspace?: string
-  /** When true, serve the web-based chat UI at the root HTTP path. */
-  webUI?: boolean
+  /**
+   * When true, serve the Claude Code dashboard SPA and expose /api/* endpoints.
+   * The dashboard assets are loaded from the `dashboard/dist/assets/` directory
+   * resolved relative to the server binary location.
+   */
+  dashboard?: boolean
 }
 
 export type SessionState =

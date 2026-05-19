@@ -15,11 +15,12 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "bun run ./scripts/build.ts",
-    "build:dev": "bun run ./scripts/build.ts --dev",
+    "build": "bun run build:dashboard && bun run ./scripts/build.ts",
+    "build:dev": "bun run build:dashboard && bun run ./scripts/build.ts --dev",
     "build:dev:full": "bun run ./scripts/build.ts --dev --feature-set=dev-full",
     "compile": "bun run ./scripts/build.ts --compile",
-    "dev": "bun run ./src/entrypoints/cli.tsx"
+    "dev": "bun run ./src/entrypoints/cli.tsx",
+    "build:dashboard": "cd dashboard && bun install && bun run build.ts"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "^0.3.0",

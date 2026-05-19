@@ -4,7 +4,12 @@ import { z } from 'zod/v4'
 import type { ServerConfig } from './types.js'
 import type { SessionManager } from './sessionManager.js'
 import type { ServerLogger } from './serverLog.js'
-import { getWebUIHtml } from './webUI.ts'
+import {
+  handleDashboardApi,
+  initDashboardSubscriber,
+  serveDashboardAsset,
+  serveDashboardHtml,
+} from './dashboardApi.js'
 
 type StartedServer = {
   port?: number
@@ -72,6 +77,9 @@ function isAuthorized(req: Request, authToken?: string): boolean {
   if (raw && raw.toLowerCase().startsWith('bearer ')) {
     return raw.slice(7) === authToken
   }
+  // Also accept X-Claude-Code-Token header (used by the dashboard SPA)
+  const dashHeader = req.headers.get('X-Claude-Code-Token')
+  if (dashHeader === authToken) return true
   // Fall back to ?token= query parameter (needed for browser WebSocket which
   // cannot set custom headers).
   const urlObj = new URL(req.url)
@@ -195,30 +203,53 @@ export function startServer(
 ): StartedServer {
   sessionManager.setLogger(logger)
 
-  // Lazily compute web UI HTML so it is only generated when web mode is on.
-  let webUIHtmlCache: string | null = null
-  const getWebUI = (): string => {
-    if (webUIHtmlCache === null) {
-      webUIHtmlCache = getWebUIHtml(config.authToken)
-    }
-    return webUIHtmlCache
+  // Wire dashboard SSE subscriber so session output is relayed to browsers.
+  let unsubscribeDashboard: (() => void) | null = null
+  if (config.dashboard) {
+    unsubscribeDashboard = initDashboardSubscriber(sessionManager)
   }
+
+  const getWorkspaceDir = (): string => config.workspace ?? process.cwd()
 
   const fetchHandler: Bun.Serve.Options<{ sessionId: string }>['fetch'] = async (req, srv) => {
     const url = new URL(req.url)
-    const route = parseRoute(url.pathname)
+    const pathname = url.pathname
 
-    if (url.pathname === '/health') {
+    // ── Dashboard SPA + asset serving ──────────────────────────────────────
+    if (config.dashboard) {
+      // Dashboard HTML at root
+      if (pathname === '/' || pathname === '/dashboard') {
+        if (!isAuthorized(req, config.authToken)) return unauthorized()
+        return await serveDashboardHtml(config.authToken)
+      }
+
+      // Dashboard static assets
+      if (pathname.startsWith('/assets/')) {
+        const assetRes = await serveDashboardAsset(pathname)
+        if (assetRes) return assetRes
+      }
+
+      // Dashboard API routes
+      if (pathname.startsWith('/api/')) {
+        const apiRes = await handleDashboardApi(
+          req,
+          pathname,
+          sessionManager,
+          config,
+          getWorkspaceDir,
+        )
+        if (apiRes) return apiRes
+        return notFound()
+      }
+    }
+
+    // ── Legacy health check ─────────────────────────────────────────────────
+    if (pathname === '/health') {
       return new Response('ok')
     }
 
-    // Serve the web UI at the root path when webUI is enabled.
-    if (config.webUI && (url.pathname === '/' || url.pathname === '/chat')) {
-      return new Response(getWebUI(), {
-        status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-      })
-    }
+    // ── Session routes ──────────────────────────────────────────────────────
+    const route = parseRoute(pathname)
 
     if (route?.kind === 'collection') {
       if (!isAuthorized(req, config.authToken)) {
@@ -331,17 +362,26 @@ export function startServer(
     },
   }
 
+  // When the dashboard is active we need SSE connections to stay open
+  // indefinitely.  Bun's default idle timeout is 10 s, which is shorter than
+  // the 8 s SSE keepalive interval, causing the browser to see repeated
+  // "event stream interrupted" disconnections.  Setting idleTimeout to 0
+  // disables the per-connection timeout entirely for this server instance.
+  const idleTimeout = config.dashboard ? 0 : undefined
+
   const server = config.unix
     ? Bun.serve<{ sessionId: string }>({
         unix: config.unix,
         fetch: fetchHandler,
         websocket: websocketHandler,
+        ...(idleTimeout !== undefined ? { idleTimeout } : {}),
       })
     : Bun.serve<{ sessionId: string }>({
         port: config.port,
         hostname: config.host,
         fetch: fetchHandler,
         websocket: websocketHandler,
+        ...(idleTimeout !== undefined ? { idleTimeout } : {}),
       })
 
   logger.info(
@@ -350,10 +390,19 @@ export function startServer(
       : `listening on http://${config.host}:${server.port}`,
   )
 
+  if (config.dashboard) {
+    const addr = config.unix
+      ? config.unix
+      : `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${server.port}`
+    logger.info(`dashboard available at ${addr}/`)
+  }
+
   return {
     port: server.port,
     stop(closeActiveConnections = false) {
+      if (unsubscribeDashboard) unsubscribeDashboard()
       server.stop(closeActiveConnections)
     },
   }
 }
+

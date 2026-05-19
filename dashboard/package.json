@@ -1,0 +1,19 @@
+{
+  "name": "@claude-code-fork/dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "bun run build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "htm": "^3.1.1",
+    "marked": "^15.0.12",
+    "preact": "^10.26.9",
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}
