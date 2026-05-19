@@ -221,7 +221,7 @@ export function ChatPanel() {
       );
       setMessages(data.messages ?? []);
       setBusy(Boolean(data.busy));
-      setCurrentSessionId(data.sessionId ?? currentSessionId);
+      setCurrentSessionId(data.sessionId ?? null);
       cancelStreamingRaf();
       setStreaming(null);
       setActiveTool(null);
@@ -347,20 +347,20 @@ export function ChatPanel() {
     if (!text || busy) return;
     setError(null);
     try {
-        const res = await api<{ accepted: boolean; reason?: string; sessionId?: string }>("/submit", {
-          method: "POST",
-          body: { prompt: text },
-        });
-        if (!res.accepted) {
-          setError(res.reason ?? "rejected");
-          return;
-        }
-        setCurrentSessionId(res.sessionId ?? currentSessionId);
-        setBusy(true);
-        setInput("");
-      } catch (err) {
-        setError((err as Error).message);
+      const res = await api<{ accepted: boolean; reason?: string; sessionId?: string }>("/submit", {
+        method: "POST",
+        body: { prompt: text },
+      });
+      if (!res.accepted) {
+        setError(res.reason ?? "rejected");
+        return;
       }
+      setCurrentSessionId(res.sessionId ?? null);
+      setBusy(true);
+      setInput("");
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }, [input, busy, currentSessionId]);
 
   const abort = useCallback(async () => {
@@ -387,14 +387,14 @@ export function ChatPanel() {
       showToast(t("chat.newToast"), "info");
       setTimeout(async () => {
         try {
-            const r = await api<MessagesResponse>(
-              currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
-            );
-            setMessages(r.messages ?? []);
-            setCurrentSessionId(r.sessionId ?? currentSessionId);
-          } catch {
-            /* swallow */
-          }
+          const r = await api<MessagesResponse>(
+            currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
+          );
+          setMessages(r.messages ?? []);
+          setCurrentSessionId(r.sessionId ?? null);
+        } catch {
+          /* swallow */
+        }
       }, 200);
     } catch (err) {
       setError(t("chat.newFailed", { error: (err as Error).message }));
@@ -410,14 +410,14 @@ export function ChatPanel() {
       showToast(t("chat.clearToast"), "info");
       setTimeout(async () => {
         try {
-            const r = await api<MessagesResponse>(
-              currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
-            );
-            setMessages(r.messages ?? []);
-            setCurrentSessionId(r.sessionId ?? currentSessionId);
-          } catch {
-            /* swallow */
-          }
+          const r = await api<MessagesResponse>(
+            currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
+          );
+          setMessages(r.messages ?? []);
+          setCurrentSessionId(r.sessionId ?? null);
+        } catch {
+          /* swallow */
+        }
       }, 200);
     } catch (err) {
       setError(t("chat.clearFailed", { error: (err as Error).message }));
@@ -845,12 +845,12 @@ export function ChatPanel() {
                   <button class="chat-composer-btn" onClick=${onComposerAutoMode} title=${t("chat.composerAutoTitle")} aria-label=${t("chat.composerAutoTitle")}>
                     <span>${preset ?? "auto"}</span>
                   </button>
-                  <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")} aria-label=${t("chat.composerToolsTitle")}>⊞</button>
                   <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")} aria-label=${t("chat.composerSlidersTitle")}>⚙</button>
+                  <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")} aria-label=${t("chat.composerToolsTitle")}>⊞</button>
                 </div>
                 <div class="chat-composer-right">
                   <button class="chat-composer-icon" onClick=${onComposerVoice} title=${t("chat.composerVoiceTitle")} aria-label=${t("chat.composerVoiceTitle")}>◉</button>
-                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} aria-label=${t("chat.composerCreatePromptTitle")} disabled=${busy}>✦</button>
+                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} aria-label=${t("chat.composerCreatePromptTitle")} disabled=${busy}>＋</button>
                   <button
                     class="chat-composer-send"
                     onClick=${send}
@@ -874,7 +874,7 @@ export function ChatPanel() {
                       onClick=${() => {
                         const order = ["review", "auto", "yolo"] as const;
                         const current = order.find((mode) => mode === editMode) ?? "review";
-                        const next = order[(order.indexOf(current) + 1) % order.length] ?? "review";
+                        const next = order[(order.indexOf(current) + 1) % order.length];
                         setEditMode(next);
                       }}
                       title=${t("chat.editGateTitle")}
