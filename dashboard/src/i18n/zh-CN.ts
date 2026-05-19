@@ -237,6 +237,9 @@ export const zhCN = {
     composerAgentOnly: "当前版本仅提供 Agent 模式。",
     composerAutoUnavailable: "当前不可切换预设模式。",
     composerAutoSwitched: "预设已切换为 {mode}。",
+    modeLocal: "本地",
+    modeViewOnly: "只读视图",
+    modeApprovals: "默认审批",
   },
   overview: {
     loading: "加载概览…",

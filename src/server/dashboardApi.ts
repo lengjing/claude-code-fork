@@ -510,7 +510,7 @@ export async function handleDashboardApi(
         }
       }
     }
-    return json({ messages, busy: false })
+    return json({ messages, busy: false, sessionId })
   }
 
   // ── GET /api/modal ───────────────────────────────────────────────────────

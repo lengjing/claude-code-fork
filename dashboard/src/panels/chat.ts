@@ -51,6 +51,7 @@ interface ChatStats {
 interface MessagesResponse {
   messages?: ChatMsg[];
   busy?: boolean;
+  sessionId?: string | null;
 }
 
 interface ModalEnvelope {
@@ -111,6 +112,7 @@ export function ChatPanel() {
   const [streaming, setStreaming] = useState<StreamingState | null>(null);
   const [activeTool, setActiveTool] = useState<ActiveToolState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -167,6 +169,7 @@ export function ChatPanel() {
         if (cancelled) return;
         setMessages(data.messages ?? []);
         setBusy(Boolean(data.busy));
+        setCurrentSessionId(data.sessionId ?? null);
       } catch (err) {
         if (!cancelled) setBootError((err as Error).message);
       }
@@ -213,9 +216,12 @@ export function ChatPanel() {
   // recover canonical state, otherwise UI wedges on the last seen state (#521).
   const refetchCanonicalState = useCallback(async () => {
     try {
-      const data = await api<MessagesResponse>("/messages");
+      const data = await api<MessagesResponse>(
+        currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
+      );
       setMessages(data.messages ?? []);
       setBusy(Boolean(data.busy));
+      setCurrentSessionId(data.sessionId ?? currentSessionId);
       cancelStreamingRaf();
       setStreaming(null);
       setActiveTool(null);
@@ -228,7 +234,7 @@ export function ChatPanel() {
     } catch {
       /* modal endpoint optional in standalone */
     }
-  }, [cancelStreamingRaf]);
+  }, [cancelStreamingRaf, currentSessionId]);
 
   useEffect(() => {
     const es = new EventSource(`/api/events?token=${TOKEN}`);
@@ -341,27 +347,31 @@ export function ChatPanel() {
     if (!text || busy) return;
     setError(null);
     try {
-      const res = await api<{ accepted: boolean; reason?: string }>("/submit", {
-        method: "POST",
-        body: { prompt: text },
-      });
-      if (!res.accepted) {
-        setError(res.reason ?? "rejected");
-        return;
+        const res = await api<{ accepted: boolean; reason?: string; sessionId?: string }>("/submit", {
+          method: "POST",
+          body: { prompt: text },
+        });
+        if (!res.accepted) {
+          setError(res.reason ?? "rejected");
+          return;
+        }
+        setCurrentSessionId(res.sessionId ?? currentSessionId);
+        setBusy(true);
+        setInput("");
+      } catch (err) {
+        setError((err as Error).message);
       }
-      setInput("");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [input, busy]);
+  }, [input, busy, currentSessionId]);
 
   const abort = useCallback(async () => {
     try {
-      await api("/abort", { method: "POST" });
+      await api(currentSessionId ? `/abort?session_id=${encodeURIComponent(currentSessionId)}` : "/abort", {
+        method: "POST",
+      });
     } catch (err) {
       setError((err as Error).message);
     }
-  }, []);
+  }, [currentSessionId]);
 
   const newConversation = useCallback(async () => {
     if (busy) {
@@ -377,16 +387,19 @@ export function ChatPanel() {
       showToast(t("chat.newToast"), "info");
       setTimeout(async () => {
         try {
-          const r = await api<MessagesResponse>("/messages");
-          setMessages(r.messages ?? []);
-        } catch {
-          /* swallow */
-        }
+            const r = await api<MessagesResponse>(
+              currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
+            );
+            setMessages(r.messages ?? []);
+            setCurrentSessionId(r.sessionId ?? currentSessionId);
+          } catch {
+            /* swallow */
+          }
       }, 200);
     } catch (err) {
       setError(t("chat.newFailed", { error: (err as Error).message }));
     }
-  }, [busy, messages.length]);
+  }, [busy, messages.length, currentSessionId]);
 
   const clearScrollback = useCallback(async () => {
     try {
@@ -397,16 +410,19 @@ export function ChatPanel() {
       showToast(t("chat.clearToast"), "info");
       setTimeout(async () => {
         try {
-          const r = await api<MessagesResponse>("/messages");
-          setMessages(r.messages ?? []);
-        } catch {
-          /* swallow */
-        }
+            const r = await api<MessagesResponse>(
+              currentSessionId ? `/messages?session_id=${encodeURIComponent(currentSessionId)}` : "/messages",
+            );
+            setMessages(r.messages ?? []);
+            setCurrentSessionId(r.sessionId ?? currentSessionId);
+          } catch {
+            /* swallow */
+          }
       }, 200);
     } catch (err) {
       setError(t("chat.clearFailed", { error: (err as Error).message }));
     }
-  }, []);
+  }, [currentSessionId]);
 
   const updatePopover = useCallback(
     async (text: string) => {
@@ -708,30 +724,6 @@ export function ChatPanel() {
             `
               : null
           }
-          ${
-            editMode
-              ? html`
-              <div class="mode-picker" title=${t("chat.editGateTitle")}>
-                ${["review", "auto", "yolo"].map(
-                  (m) => html`
-                  <button
-                    key=${m}
-                    class="mode-btn ${editMode === m ? "active" : ""} ${m === "yolo" ? "yolo" : ""}"
-                    onClick=${() => setEditMode(m)}
-                    title=${
-                      m === "review"
-                        ? t("chat.editReviewTitle")
-                        : m === "auto"
-                          ? t("chat.editAutoTitle")
-                          : t("chat.editYoloTitle")
-                    }
-                  >${m}</button>
-                `,
-                )}
-              </div>
-            `
-              : null
-          }
         </div>
       </div>
 
@@ -791,8 +783,13 @@ export function ChatPanel() {
       <div class="chat-body">
         <div class="chat-main">
           <${ChatFeed} messages=${messages} streaming=${streaming} innerRef=${feedRef} />
+        </div>
 
-          <div class="chat-input-area">
+        <${SideRail} stats=${stats} budgetUsd=${budgetUsd} activePlan=${activePlan} />
+      </div>
+
+      <div class="chat-bottom">
+        <div class="chat-input-area">
             ${
               popoverKind && popoverItems.length > 0
                 ? html`
@@ -848,12 +845,12 @@ export function ChatPanel() {
                   <button class="chat-composer-btn" onClick=${onComposerAutoMode} title=${t("chat.composerAutoTitle")} aria-label=${t("chat.composerAutoTitle")}>
                     <span>${preset ?? "auto"}</span>
                   </button>
-                  <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")} aria-label=${t("chat.composerSlidersTitle")}>⚙</button>
                   <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")} aria-label=${t("chat.composerToolsTitle")}>⊞</button>
+                  <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")} aria-label=${t("chat.composerSlidersTitle")}>⚙</button>
                 </div>
                 <div class="chat-composer-right">
                   <button class="chat-composer-icon" onClick=${onComposerVoice} title=${t("chat.composerVoiceTitle")} aria-label=${t("chat.composerVoiceTitle")}>◉</button>
-                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} aria-label=${t("chat.composerCreatePromptTitle")} disabled=${busy}>＋</button>
+                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} aria-label=${t("chat.composerCreatePromptTitle")} disabled=${busy}>✦</button>
                   <button
                     class="chat-composer-send"
                     onClick=${send}
@@ -863,29 +860,52 @@ export function ChatPanel() {
                 </div>
               </div>
             </div>
-            <div class="chat-input-quick">
-              <button onClick=${newConversation} title=${t("chat.newTitle")}>${t("chat.new")}</button>
-              <button onClick=${clearScrollback} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
-              <span class="muted">${t("chat.placeholder")}</span>
+            <div class="chat-modebar">
+              <div class="chat-modebar-left">
+                <span class="chat-mode-chip">
+                  <span class="chat-mode-chip-icon">⌂</span>
+                  <span>${MODE === "attached" ? t("chat.modeLocal") : t("chat.modeViewOnly")}</span>
+                </span>
+                ${
+                  editMode
+                    ? html`
+                    <button
+                      class="chat-mode-chip chat-mode-chip-button"
+                      onClick=${() => {
+                        const order = ["review", "auto", "yolo"] as const;
+                        const current = order.find((mode) => mode === editMode) ?? "review";
+                        const next = order[(order.indexOf(current) + 1) % order.length] ?? "review";
+                        setEditMode(next);
+                      }}
+                      title=${t("chat.editGateTitle")}
+                    >
+                      <span class="chat-mode-chip-icon">⛨</span>
+                      <span>${t("chat.modeApprovals")}</span>
+                      <span class="chat-mode-chip-value">${editMode}</span>
+                    </button>
+                  `
+                    : null
+                }
+              </div>
+              <div class="chat-modebar-right">
+                <button class="chat-mode-link" onClick=${newConversation} title=${t("chat.newTitle")}>${t("chat.new")}</button>
+                <button class="chat-mode-link" onClick=${clearScrollback} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
+              </div>
             </div>
           </div>
-
-          ${
-            busy
-              ? html`<${InFlightRow}
-                  streaming=${streaming}
-                  activeTool=${activeTool}
-                  startedAt=${turnStartedAt}
-                  statusLine=${statusLine}
-                  onAbort=${abort}
-                  tick=${nowTick}
-                />`
-              : null
-          }
-          <${ChatStatusBar} stats=${stats} model=${overviewModel} />
-        </div>
-
-        <${SideRail} stats=${stats} budgetUsd=${budgetUsd} activePlan=${activePlan} />
+        ${
+          busy
+            ? html`<${InFlightRow}
+                streaming=${streaming}
+                activeTool=${activeTool}
+                startedAt=${turnStartedAt}
+                statusLine=${statusLine}
+                onAbort=${abort}
+                tick=${nowTick}
+              />`
+            : null
+        }
+        <${ChatStatusBar} stats=${stats} model=${overviewModel} />
       </div>
     </div>
   `;

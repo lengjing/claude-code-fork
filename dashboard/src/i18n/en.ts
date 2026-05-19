@@ -240,6 +240,9 @@ export const en = {
     composerAgentOnly: "Only Agent mode is available in this version.",
     composerAutoUnavailable: "Preset switching is unavailable right now.",
     composerAutoSwitched: "Preset switched to {mode}.",
+    modeLocal: "Local",
+    modeViewOnly: "View only",
+    modeApprovals: "Default Approvals",
   },
   overview: {
     loading: "loading overview…",

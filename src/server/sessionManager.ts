@@ -312,6 +312,7 @@ export class SessionManager {
             : undefined,
         )
         .then(() => {
+          this.broadcastToClients(session, payload)
           session.child.stdin.write(payload + '\n')
         })
         .catch(error => {
