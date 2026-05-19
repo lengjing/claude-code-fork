@@ -606,6 +606,48 @@ export function ChatPanel() {
     }
   }, []);
 
+  const onComposerAttach = useCallback(() => {
+    if (busy) return;
+    const next = input.trim().length === 0 ? "@" : `${input} @`;
+    setInput(next);
+    void updatePopover(next);
+  }, [busy, input, updatePopover]);
+
+  const onComposerCreatePrompt = useCallback(() => {
+    if (busy) return;
+    const next = "/create-prompt ";
+    setInput(next);
+    void updatePopover(next);
+  }, [busy, updatePopover]);
+
+  const onComposerVoice = useCallback(() => {
+    showToast(t("chat.composerVoiceUnavailable"), "info");
+  }, []);
+
+  const onComposerAgentMode = useCallback(() => {
+    showToast(t("chat.composerAgentOnly"), "info");
+  }, []);
+
+  const onComposerAutoMode = useCallback(() => {
+    if (!preset) {
+      showToast(t("chat.composerAutoUnavailable"), "warning");
+      return;
+    }
+    const order = ["auto", "flash", "pro"];
+    const current = order.includes(preset) ? preset : "auto";
+    const next = order[(order.indexOf(current) + 1) % order.length]!;
+    void setSetting("preset", next);
+    showToast(t("chat.composerAutoSwitched", { mode: next }), "info");
+  }, [preset, setSetting]);
+
+  const onComposerSliders = useCallback(() => {
+    appBus.dispatchEvent(new CustomEvent("navigate-tab", { detail: { tabId: "settings" } }));
+  }, []);
+
+  const onComposerTools = useCallback(() => {
+    appBus.dispatchEvent(new CustomEvent("navigate-tab", { detail: { tabId: "tools" } }));
+  }, []);
+
   return html`
     <div class="chat-shell">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
@@ -747,11 +789,11 @@ export function ChatPanel() {
         <div class="chat-main">
           <${ChatFeed} messages=${messages} streaming=${streaming} innerRef=${feedRef} />
 
-          <div class="chat-input-area" style="position:relative">
+          <div class="chat-input-area">
             ${
               popoverKind && popoverItems.length > 0
                 ? html`
-                  <div class="popover" style="position:absolute;bottom:calc(100% + 6px);left:0;width:380px;max-height:280px;overflow-y:auto;z-index:10">
+                  <div class="popover chat-composer-popover">
                     <div class="popover-h">${popoverKind === "slash" ? t("chat.slashCommands") : t("chat.projectFiles")}</div>
                     ${popoverItems.map(
                       (it, i) => html`
@@ -773,25 +815,55 @@ export function ChatPanel() {
                 `
                 : null
             }
-            <textarea
-              placeholder=${busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
-              value=${input}
-              onInput=${onInput}
-              onKeyDown=${onKeyDown}
-              onBlur=${() => setTimeout(() => setPopoverKind(null), 150)}
-              disabled=${busy}
-              rows="2"
-            ></textarea>
-            <div style="display: flex; flex-direction: column; gap: 6px; align-self: stretch; justify-content: flex-end;">
-              <button
-                class="primary"
-                onClick=${send}
-                disabled=${busy || !input.trim()}
-              >${t("chat.send")}</button>
-              <div style="display: flex; gap: 6px;">
-                <button onClick=${newConversation} title=${t("chat.newTitle")}>${t("chat.new")}</button>
-                <button onClick=${clearScrollback} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
+            <div class="chat-composer">
+              <div class="chat-composer-tip">
+                <strong>${t("chat.composerTipLabel")}</strong>
+                <span>${t("chat.composerTipText")}</span>
               </div>
+              <div class="chat-composer-context">
+                <span class="chat-composer-context-icon">⌇</span>
+                <span class="chat-composer-context-text">${t("chat.composerContext")}</span>
+              </div>
+              <textarea
+                class="chat-composer-textarea"
+                placeholder=${busy ? t("chat.placeholderBusy") : t("chat.composerPlaceholder")}
+                value=${input}
+                onInput=${onInput}
+                onKeyDown=${onKeyDown}
+                onBlur=${() => setTimeout(() => setPopoverKind(null), 150)}
+                disabled=${busy}
+                rows="2"
+              ></textarea>
+              <div class="chat-composer-toolbar">
+                <div class="chat-composer-left">
+                  <button class="chat-composer-icon" onClick=${onComposerAttach} title=${t("chat.composerAttachTitle")} disabled=${busy}>＋</button>
+                  <button class="chat-composer-btn" onClick=${onComposerAgentMode} title=${t("chat.composerAgentTitle")}>
+                    <span class="chat-composer-code">〈〉</span>
+                    <span>${t("chat.composerAgent")}</span>
+                  </button>
+                  <span class="chat-composer-sep">|</span>
+                  <button class="chat-composer-btn" onClick=${onComposerAutoMode} title=${t("chat.composerAutoTitle")}>
+                    <span>${preset ?? "auto"}</span>
+                  </button>
+                  <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")}>⚙</button>
+                  <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")}>⊞</button>
+                </div>
+                <div class="chat-composer-right">
+                  <button class="chat-composer-icon" onClick=${onComposerVoice} title=${t("chat.composerVoiceTitle")}>◉</button>
+                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} disabled=${busy}>＋</button>
+                  <button
+                    class="chat-composer-send"
+                    onClick=${send}
+                    disabled=${busy || !input.trim()}
+                    title=${t("chat.send")}
+                  >${t("chat.send")}</button>
+                </div>
+              </div>
+            </div>
+            <div class="chat-input-quick">
+              <button onClick=${newConversation} title=${t("chat.newTitle")}>${t("chat.new")}</button>
+              <button onClick=${clearScrollback} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
+              <span class="muted">${t("chat.placeholder")}</span>
             </div>
           </div>
 
