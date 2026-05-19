@@ -33,6 +33,7 @@
   --c-warn:     #ffb547;   /* amber  — warning */
   --c-err:      #ff6b72;   /* coral  — error */
   --c-info:     #60b8ff;   /* sky    — info */
+  --c-tip:      #ffd48a;   /* soft amber — helper tips */
 
   /* Chart spectrum */
   --s1: #00dba4;
@@ -57,6 +58,7 @@
 
   /* Gradients */
   --gradient-rule: linear-gradient(90deg, transparent, rgba(0,219,164,.4), transparent);
+  --chat-composer-font-size: 33px;
 }
 
 /* ── Reset & base ───────────────────────────────────────────────────────── */
@@ -1009,7 +1011,7 @@ input:focus, textarea:focus, select:focus {
   color: var(--fg-2);
   font-size: 14px;
 }
-.chat-composer-tip strong { color: #ffd48a; font-weight: 600; }
+.chat-composer-tip strong { color: var(--c-tip); font-weight: 600; }
 .chat-composer-tip span { color: var(--fg-1); }
 
 .chat-composer-context {
@@ -1046,7 +1048,7 @@ input:focus, textarea:focus, select:focus {
   outline: none;
   color: var(--fg-0);
   font-family: var(--font-sans);
-  font-size: 33px;
+  font-size: var(--chat-composer-font-size);
   line-height: 1.25;
   letter-spacing: -.01em;
   resize: vertical;

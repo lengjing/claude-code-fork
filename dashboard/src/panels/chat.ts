@@ -103,6 +103,8 @@ interface SettingsPatch {
   reasoningEffort?: string;
 }
 
+const PRESET_CYCLE_ORDER = ["auto", "flash", "pro"] as const;
+
 export function ChatPanel() {
   useLang();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -611,34 +613,35 @@ export function ChatPanel() {
     const next = input.trim().length === 0 ? "@" : `${input} @`;
     setInput(next);
     void updatePopover(next);
-  }, [busy, input, updatePopover]);
+  }, [busy, input, setInput, updatePopover]);
 
   const onComposerCreatePrompt = useCallback(() => {
     if (busy) return;
     const next = "/create-prompt ";
     setInput(next);
     void updatePopover(next);
-  }, [busy, updatePopover]);
+  }, [busy, setInput, updatePopover]);
 
   const onComposerVoice = useCallback(() => {
     showToast(t("chat.composerVoiceUnavailable"), "info");
-  }, []);
+  }, [showToast]);
 
   const onComposerAgentMode = useCallback(() => {
     showToast(t("chat.composerAgentOnly"), "info");
-  }, []);
+  }, [showToast]);
 
   const onComposerAutoMode = useCallback(() => {
     if (!preset) {
-      showToast(t("chat.composerAutoUnavailable"), "warning");
+      showToast(t("chat.composerAutoUnavailable"), "info");
       return;
     }
-    const order = ["auto", "flash", "pro"];
-    const current = order.includes(preset) ? preset : "auto";
-    const next = order[(order.indexOf(current) + 1) % order.length]!;
+    const isValidPreset = PRESET_CYCLE_ORDER.some((mode) => mode === preset);
+    const current = (isValidPreset ? preset : "auto") as (typeof PRESET_CYCLE_ORDER)[number];
+    const nextIndex = (PRESET_CYCLE_ORDER.indexOf(current) + 1) % PRESET_CYCLE_ORDER.length;
+    const next = PRESET_CYCLE_ORDER[nextIndex] ?? "auto";
     void setSetting("preset", next);
     showToast(t("chat.composerAutoSwitched", { mode: next }), "info");
-  }, [preset, setSetting]);
+  }, [preset, setSetting, showToast, t]);
 
   const onComposerSliders = useCallback(() => {
     appBus.dispatchEvent(new CustomEvent("navigate-tab", { detail: { tabId: "settings" } }));
@@ -821,7 +824,7 @@ export function ChatPanel() {
                 <span>${t("chat.composerTipText")}</span>
               </div>
               <div class="chat-composer-context">
-                <span class="chat-composer-context-icon">⌇</span>
+                <span class="chat-composer-context-icon" aria-hidden="true">⌇</span>
                 <span class="chat-composer-context-text">${t("chat.composerContext")}</span>
               </div>
               <textarea
@@ -836,21 +839,21 @@ export function ChatPanel() {
               ></textarea>
               <div class="chat-composer-toolbar">
                 <div class="chat-composer-left">
-                  <button class="chat-composer-icon" onClick=${onComposerAttach} title=${t("chat.composerAttachTitle")} disabled=${busy}>＋</button>
-                  <button class="chat-composer-btn" onClick=${onComposerAgentMode} title=${t("chat.composerAgentTitle")}>
+                  <button class="chat-composer-icon" onClick=${onComposerAttach} title=${t("chat.composerAttachTitle")} aria-label=${t("chat.composerAttachTitle")} disabled=${busy}>＋</button>
+                  <button class="chat-composer-btn" onClick=${onComposerAgentMode} title=${t("chat.composerAgentTitle")} aria-label=${t("chat.composerAgentTitle")}>
                     <span class="chat-composer-code">〈〉</span>
                     <span>${t("chat.composerAgent")}</span>
                   </button>
                   <span class="chat-composer-sep">|</span>
-                  <button class="chat-composer-btn" onClick=${onComposerAutoMode} title=${t("chat.composerAutoTitle")}>
+                  <button class="chat-composer-btn" onClick=${onComposerAutoMode} title=${t("chat.composerAutoTitle")} aria-label=${t("chat.composerAutoTitle")}>
                     <span>${preset ?? "auto"}</span>
                   </button>
-                  <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")}>⚙</button>
-                  <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")}>⊞</button>
+                  <button class="chat-composer-icon" onClick=${onComposerSliders} title=${t("chat.composerSlidersTitle")} aria-label=${t("chat.composerSlidersTitle")}>⚙</button>
+                  <button class="chat-composer-icon" onClick=${onComposerTools} title=${t("chat.composerToolsTitle")} aria-label=${t("chat.composerToolsTitle")}>⊞</button>
                 </div>
                 <div class="chat-composer-right">
-                  <button class="chat-composer-icon" onClick=${onComposerVoice} title=${t("chat.composerVoiceTitle")}>◉</button>
-                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} disabled=${busy}>＋</button>
+                  <button class="chat-composer-icon" onClick=${onComposerVoice} title=${t("chat.composerVoiceTitle")} aria-label=${t("chat.composerVoiceTitle")}>◉</button>
+                  <button class="chat-composer-icon" onClick=${onComposerCreatePrompt} title=${t("chat.composerCreatePromptTitle")} aria-label=${t("chat.composerCreatePromptTitle")} disabled=${busy}>＋</button>
                   <button
                     class="chat-composer-send"
                     onClick=${send}
